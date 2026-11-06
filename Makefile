@@ -191,3 +191,7 @@ run-debug: iso
 
 clean:
 	rm -rf $(BUILD_DIR) *.o *.ppu
+
+.PHONY: phase10-check
+phase10-check:
+	$(PYTHON) tools/check_phase10.py

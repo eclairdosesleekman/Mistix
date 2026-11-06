@@ -119,3 +119,17 @@ mistix-phase9/
 - `fork()` 後は remote open description を共有し、ファイル位置も共有します。Copy-on-Write と同様の UNIX 共有 open-file-description の意味論を意図しています。
 
 次段階では `getdents/chdir/getcwd` の broker 化、複数 outstanding RPC、キャンセル／タイムアウト、vfsd 再起動後の FD 回復、UID/GID/mode、Ext2 write transaction を進めます。
+
+
+## Phase 10 — Directory and asynchronous VFS protocol groundwork
+
+Phase 10 adds the versioned Pascal ABI in
+userland/common/mistix_vfs_protocol.inc and static contract checks via
+make phase10-check. It defines directory open/read/close, chdir/getcwd,
+cancellation, bounded directory entries and RequestID+OwnerPID response
+matching. Existing Phase 9 syscall paths remain unchanged until the kernel
+broker and vfsd can be upgraded atomically.
+
+See docs/PHASE10-DESIGN.md for protocol, lifecycle, security rules and gaps.
+
+Run: make phase10-check
