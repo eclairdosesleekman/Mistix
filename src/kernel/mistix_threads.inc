@@ -1,12 +1,16 @@
+{ Phase 1 cooperative kernel threads, extended in Phase 2 with wait queues.
+  This remains a single-CPU scheduler. No locks are required while IF=0. }
+
 type
   TThreadEntry = procedure;
-  TThreadState = (tsFree, tsRunnable, tsRunning, tsTerminated);
+  TThreadState = (tsFree, tsRunnable, tsRunning, tsBlocked, tsTerminated);
 
   TKernelThread = record
     Id: LongWord;
     State: TThreadState;
     Entry: TThreadEntry;
     SavedStackPointer: QWord;
+    WaitKey: QWord;
   end;
 
 var
@@ -16,6 +20,8 @@ var
   NextThreadId: LongWord;
 
 procedure ThreadYield; forward;
+procedure ThreadBlockCurrent(WaitKey: QWord); forward;
+function ThreadWakeWaiters(WaitKey: QWord; WakeAll: Boolean): LongWord; forward;
 
 procedure ContextSwitch(OldStackPointer: PQWord; NewStackPointer: QWord);
   cdecl; assembler; nostackframe; public name 'mistix_context_switch';
@@ -40,17 +46,20 @@ end;
 procedure ThreadBootstrap; cdecl;
 var
   Entry: TThreadEntry;
+  ThreadId: LongWord;
 begin
   Entry := ThreadTable[CurrentThreadIndex].Entry;
+  ThreadId := ThreadTable[CurrentThreadIndex].Id;
   if Assigned(Entry) then
     Entry();
 
   WriteText('[THREAD] thread ');
-  WriteDecimal(ThreadTable[CurrentThreadIndex].Id);
+  WriteDecimal(ThreadId);
   WriteText(' terminated.'#13#10);
   ThreadTable[CurrentThreadIndex].State := tsTerminated;
+  ThreadTable[CurrentThreadIndex].WaitKey := 0;
   ThreadYield;
-  HaltForever; { unreachable unless scheduler invariants are broken }
+  HaltForever; { no runnable context may return to a terminated thread }
 end;
 
 procedure ThreadsInitialize;
@@ -63,6 +72,7 @@ begin
     ThreadTable[I].State := tsFree;
     ThreadTable[I].Entry := nil;
     ThreadTable[I].SavedStackPointer := 0;
+    ThreadTable[I].WaitKey := 0;
   end;
 
   NextThreadId := 1;
@@ -70,8 +80,11 @@ begin
   ThreadTable[0].Id := NextThreadId;
   Inc(NextThreadId);
   ThreadTable[0].State := tsRunning;
-  ThreadTable[0].Entry := nil; { bootstrap/main thread uses Limine's stack }
-  WriteText('[ OK ] Cooperative kernel-thread scheduler initialised.'#13#10);
+  ThreadTable[0].Entry := nil;
+  ThreadTable[0].WaitKey := 0;
+  WriteText('[ OK ] Cooperative kernel-thread scheduler initialised (' );
+  WriteDecimal(THREAD_MAX_COUNT);
+  WriteText(' slots).'#13#10);
 end;
 
 function ThreadCreate(Entry: TThreadEntry; var ThreadId: LongWord): Boolean;
@@ -107,9 +120,12 @@ begin
 
     ThreadTable[I].Id := NextThreadId;
     Inc(NextThreadId);
+    if NextThreadId = 0 then
+      NextThreadId := 1;
     ThreadTable[I].State := tsRunnable;
     ThreadTable[I].Entry := Entry;
     ThreadTable[I].SavedStackPointer := InitialSP;
+    ThreadTable[I].WaitKey := 0;
     ThreadId := ThreadTable[I].Id;
     Result := True;
     Exit;
@@ -135,19 +151,22 @@ begin
   end;
 end;
 
-procedure ThreadYield;
+procedure ThreadSchedule;
 var
   OldIndex: LongWord;
   NextIndex: LongWord;
 begin
   OldIndex := CurrentThreadIndex;
-  if ThreadTable[OldIndex].State = tsRunning then
-    ThreadTable[OldIndex].State := tsRunnable;
-
   if not FindNextRunnable(OldIndex, NextIndex) then
   begin
     if ThreadTable[OldIndex].State = tsRunnable then
+    begin
       ThreadTable[OldIndex].State := tsRunning;
+      Exit;
+    end;
+    { Phase 2 has no interrupt-driven wake source yet. If every thread is
+      blocked/terminated, there is no event that can make progress. }
+    HaltForever;
     Exit;
   end;
 
@@ -155,6 +174,41 @@ begin
   CurrentThreadIndex := NextIndex;
   ContextSwitch(@ThreadTable[OldIndex].SavedStackPointer,
                 ThreadTable[NextIndex].SavedStackPointer);
+end;
+
+procedure ThreadYield;
+begin
+  if ThreadTable[CurrentThreadIndex].State = tsRunning then
+    ThreadTable[CurrentThreadIndex].State := tsRunnable;
+  ThreadSchedule;
+end;
+
+procedure ThreadBlockCurrent(WaitKey: QWord);
+begin
+  if WaitKey = 0 then
+    Exit;
+  ThreadTable[CurrentThreadIndex].WaitKey := WaitKey;
+  ThreadTable[CurrentThreadIndex].State := tsBlocked;
+  ThreadSchedule;
+end;
+
+function ThreadWakeWaiters(WaitKey: QWord; WakeAll: Boolean): LongWord;
+var
+  I: LongWord;
+begin
+  Result := 0;
+  if WaitKey = 0 then
+    Exit;
+  for I := 0 to THREAD_MAX_COUNT - 1 do
+    if (ThreadTable[I].State = tsBlocked) and
+       (ThreadTable[I].WaitKey = WaitKey) then
+    begin
+      ThreadTable[I].WaitKey := 0;
+      ThreadTable[I].State := tsRunnable;
+      Inc(Result);
+      if not WakeAll then
+        Exit;
+    end;
 end;
 
 function HasRunnableWorker: Boolean;

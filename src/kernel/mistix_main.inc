@@ -26,7 +26,7 @@ begin
   end;
   if Paging^.Mode <> LIMINE_PAGING_MODE_X86_64_4LVL then
   begin
-    WriteText('[FAIL] Mistix Phase 1 requires 4-level paging; actual mode=');
+    WriteText('[FAIL] Mistix requires 4-level paging; actual mode=');
     WriteDecimal(Paging^.Mode);
     WriteText(#13#10);
     Exit;
@@ -62,30 +62,17 @@ begin
   Result := True;
 end;
 
-procedure WorkerAlpha;
-begin
-  WriteText('[THREAD] alpha: first dispatch.'#13#10);
-  ThreadYield;
-  WriteText('[THREAD] alpha: resumed after cooperative yield.'#13#10);
-end;
-
-procedure WorkerBeta;
-begin
-  WriteText('[THREAD] beta: first dispatch.'#13#10);
-  ThreadYield;
-  WriteText('[THREAD] beta: resumed after cooperative yield.'#13#10);
-end;
-
 procedure KernelMain; cdecl; public name 'mistix_kernel_main';
 var
   Memmap: PLimineMemmapResponse;
   HHDM: PLimineHHDMResponse;
-  AlphaId: LongWord;
-  BetaId: LongWord;
+  IPCTestOK: Boolean;
+  NotificationTestOK: Boolean;
+  MemoryObjectTestOK: Boolean;
 begin
   SerialInit;
   WriteText(#13#10'=================================================='#13#10);
-  WriteText(' Mistix - Phase 1: CPU and memory foundations     '#13#10);
+  WriteText(' Mistix - Phase 2: IPC and capability kernel       '#13#10);
   WriteText(' Pascal freestanding kernel / x86-64              '#13#10);
   WriteText('=================================================='#13#10);
 
@@ -96,7 +83,6 @@ begin
   end;
 
   CPUInitialize;
-
   Memmap := LimineRequests.MemmapRequest.Response;
   HHDM := LimineRequests.HHDMRequest.Response;
   if not MemoryInitialize(Memmap, HHDM^.Offset) then
@@ -106,27 +92,27 @@ begin
   end;
 
   ThreadsInitialize;
-  if not ThreadCreate(@WorkerAlpha, AlphaId) then
+  CapabilityInitialize;
+  IPCInitialize;
+  NotificationInitialize;
+  MemoryObjectInitialize;
+
+  WriteText(#13#10'[PHASE 2] Running kernel subsystem self-tests.'#13#10);
+  IPCTestOK := IPCRendezvousSelfTest;
+  NotificationTestOK := NotificationSelfTest;
+  MemoryObjectTestOK := MemoryObjectAliasSelfTest;
+
+  if not IPCTestOK or not NotificationTestOK or not MemoryObjectTestOK then
   begin
-    WriteText('[FAIL] Could not create alpha kernel thread.'#13#10);
-    HaltForever;
-  end;
-  if not ThreadCreate(@WorkerBeta, BetaId) then
-  begin
-    WriteText('[FAIL] Could not create beta kernel thread.'#13#10);
+    WriteText('[FAIL] One or more Phase 2 self-tests failed.'#13#10);
     HaltForever;
   end;
 
-  WriteText('[ OK ] Created cooperative kernel threads: ');
-  WriteDecimal(AlphaId);
-  WriteText(' and ');
-  WriteDecimal(BetaId);
-  WriteText(#13#10);
-  ThreadsRunUntilIdle;
-
-  WriteText('[PASS] Phase 1 CPU tables, exception IDT, PMM, VMM and kernel-thread context switching are alive.'#13#10);
-  WriteText('[NOTE] Interrupts remain disabled; scheduling is cooperative, not timer-preemptive.'#13#10);
-  WriteText('Mistix Phase 1 halted cleanly.'#13#10);
+  WriteText(#13#10'[PASS] Phase 2 capability checks, blocking IPC, notifications,'#13#10);
+  WriteText('       and page-backed memory-object aliasing are alive.'#13#10);
+  WriteText('[NOTE] Capability table is kernel-global until process spaces exist.'#13#10);
+  WriteText('[NOTE] Scheduler is cooperative; IF remains disabled.'#13#10);
+  WriteText('Mistix Phase 2 halted cleanly.'#13#10);
   HaltForever;
 end;
 

@@ -12,7 +12,7 @@ BUILD_DIR := build
 ISO_ROOT  := $(BUILD_DIR)/iso_root
 KERNEL_OBJ := $(BUILD_DIR)/mistixkernel.o
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
-ISO_IMAGE := $(BUILD_DIR)/mistix-phase1.iso
+ISO_IMAGE := $(BUILD_DIR)/mistix-phase2.iso
 SRC_DIR   := src/kernel
 PASCAL_SOURCES := $(SRC_DIR)/mistixkernel.pas \
                   $(SRC_DIR)/mistix_types.inc \
@@ -20,16 +20,23 @@ PASCAL_SOURCES := $(SRC_DIR)/mistixkernel.pas \
                   $(SRC_DIR)/mistix_cpu.inc \
                   $(SRC_DIR)/mistix_memory.inc \
                   $(SRC_DIR)/mistix_threads.inc \
+                  $(SRC_DIR)/mistix_capability.inc \
+                  $(SRC_DIR)/mistix_ipc.inc \
+                  $(SRC_DIR)/mistix_notification.inc \
+                  $(SRC_DIR)/mistix_memory_object.inc \
                   $(SRC_DIR)/mistix_main.inc
 
-.PHONY: all kernel verify iso run run-debug clean check-tools
+.PHONY: all check-source kernel verify iso run run-debug clean check-tools
 
-all: kernel verify
+all: check-source kernel verify
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-kernel: $(KERNEL_ELF)
+check-source:
+	python3 tools/check_source.py
+
+kernel: check-source $(KERNEL_ELF)
 
 $(KERNEL_OBJ): $(PASCAL_SOURCES) | $(BUILD_DIR)
 	$(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU$(BUILD_DIR) -FE$(BUILD_DIR) -Fu$(SRC_DIR) $(SRC_DIR)/mistixkernel.pas
@@ -53,7 +60,8 @@ verify: $(KERNEL_ELF)
 	@$(NM) $(KERNEL_ELF) | grep -q ' _start$$' || { echo 'Missing _start entry point'; exit 1; }
 	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_exception_dispatch$$' || { echo 'Missing exception dispatcher'; exit 1; }
 	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_context_switch$$' || { echo 'Missing context-switch routine'; exit 1; }
-	@echo 'Mistix Phase 1 ELF verification passed.'
+	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_kernel_main$$' || { echo 'Missing kernel main'; exit 1; }
+	@echo 'Mistix Phase 2 ELF verification passed.'
 	@$(READELF) -h $(KERNEL_ELF) | grep 'Entry point address'
 
 check-tools:
