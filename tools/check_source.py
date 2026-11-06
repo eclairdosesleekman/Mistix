@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural checks for Mistix Phase 6. This is not an FPC compiler."""
+"""Structural checks for Mistix Phase 7. This is not an FPC compiler."""
 from __future__ import annotations
 import re
 import sys
@@ -31,7 +31,7 @@ def require(path: Path, tokens: tuple[str, ...]) -> str:
 def main() -> int:
     kernel_unit = require(ROOT / "src/kernel/mistixkernel.pas", (
         "mistix_block.inc", "mistix_ext2.inc", "mistix_mount.inc",
-        "mistix_net.inc", "mistix_vfs.inc", "mistix_syscall.inc",
+        "mistix_net.inc", "mistix_vfs.inc", "mistix_shm.inc", "mistix_syscall.inc",
     ))
     includes = re.findall(r"\{\$I\s+([^}]+)\}", kernel_unit, flags=re.I)
     for include in includes:
@@ -43,7 +43,7 @@ def main() -> int:
         "mistix_ipc.inc", "mistix_notification.inc", "mistix_memory_object.inc",
         "mistix_address_space.inc", "mistix_cow.inc", "mistix_block.inc",
         "mistix_ext2.inc", "mistix_mount.inc", "mistix_net.inc",
-        "mistix_vfs.inc", "mistix_process.inc", "mistix_syscall.inc",
+        "mistix_vfs.inc", "mistix_process.inc", "mistix_shm.inc", "mistix_syscall.inc",
         "mistix_timer.inc", "mistix_trap.inc", "mistix_main.inc",
     ]
     for name in order:
@@ -60,7 +60,8 @@ def main() -> int:
         "Ext2Mount", "Ext2ReadInode", "Ext2LookupPath", "Ext2ReadFile",
         "MountRegisterExt2", "MountFindLongestPrefix", "NetParseEthernetFrame",
         "NetIPv4Checksum", "VFSInitialize", "ProcessSpawnFromPath",
-        "SyscallDispatchFrame", "TrapDispatch",
+        "SyscallDispatchFrame", "TrapDispatch", "P7ShmCreate", "P7ShmMap",
+        "P7ShmUnmap", "P7ShmReleaseProcess", "okMemoryObject",
     ):
         if not re.search(rf"\b{re.escape(token)}\b", kernel_text):
             fail(f"Kernel is missing {token}")
@@ -88,6 +89,7 @@ def main() -> int:
         "TMistixIPCMessage", "SysEndpointCreate", "SysIPCSend",
         "SysIPCReceive", "SysCapabilityTransfer", "SysCapabilityReceive",
         "SysCapabilityClose", "SysSpawnPath", "SysWriteAll",
+        "SysShmCreate", "SysShmMap", "SysShmUnmap", "MISTIX_SYSCALL_SHM_CREATE",
     ))
     if "Reserved: array[0..6] of Byte" not in lib or "Words: array[0..5] of QWord" not in lib:
         fail("Userland IPC message ABI does not match the kernel TIPCMessage")
@@ -103,7 +105,7 @@ def main() -> int:
     block_retry = require(ROOT / "userland/block/mistixblockd.pas", (
         "if Status = MISTIX_EAGAIN then SysYield",
         "else if IsError(Status) then SysExit(12)",
-        "if Request.WordCount < 3 then Exit",
+        "if Request.WordCount < 2 then Exit",
     ))
 
     vfsd = require(ROOT / "userland/vfs/mistixvfsd.pas", (
@@ -118,6 +120,37 @@ def main() -> int:
         "TestVFSService", "TestBlockService", "SysCapabilityTransfer",
         "VFSdPath", "BlockdPath", "VFS_RPC_PING", "BLOCK_RPC_WRITE",
     ))
+    shm = require(KERNEL / "mistix_shm.inc", (
+        "P7_SHM_OBJECT_MAX", "P7_SHM_PAGES_MAX", "AddressSpaceMapPage",
+        "ProcessCapabilityInstall", "P7ShmReleaseProcess", "PTE_USER",
+    ))
+    process = require(KERNEL / "mistix_process.inc", (
+        "okMemoryObject", "AllowedRights", "P7ShmReleaseProcess(ProcessIndex)",
+    ))
+    shm = require(KERNEL / "mistix_shm.inc", (
+        "P7ShmProcessHasMappings", "P7ShmReleaseProcess",
+    ))
+    syscall = require(KERNEL / "mistix_syscall.inc", (
+        "MISTIX_ERR_BUSY", "P7ShmProcessHasMappings(CurrentProcessIndex)",
+    ))
+    vfsd = require(ROOT / "userland/vfs/mistixvfsd.pas", (
+        "VFS_RPC_CREATE", "VFS_RPC_WRITE", "VFS_RPC_UNLINK",
+        "VFS_SHARED_BASE", "TempPathAllowed", "SharedBuffer",
+    ))
+    blockd = require(ROOT / "userland/block/mistixblockd.pas", (
+        "BLOCK_SHARED_BASE", "SysShmMap", "SharedBuffer", "BLOCK_RPC_WRITE",
+    ))
+    devd = require(ROOT / "userland/device/mistixdevd.pas", (
+        "DEV_RPC_REGISTER", "DEV_RPC_LIST", "DEV_RPC_INFO", "DeviceRecord",
+    ))
+    netd = require(ROOT / "userland/network/mistixnetd.pas", (
+        "NET_RPC_IFINFO", "NET_RPC_ARP_LOOKUP", "NET_RPC_UDP_ECHO",
+        "BuildLoopbackFrame", "ValidateLoopbackFrame", "UDPChecksum",
+    ))
+    for token in ("TestDeviceManager", "TestNetworkService", "ShareMemoryWith",
+                  "VFS_RPC_CREATE", "VFS_RPC_WRITE", "SysShmCreate"):
+        if token not in init:
+            fail(f"init test harness is missing {token}")
 
     for name, path in {
         "shell": ROOT / "userland/sh/mistixsh.pas",
@@ -131,24 +164,27 @@ def main() -> int:
 
     makefile = require(ROOT / "Makefile", (
         "mistix_block.inc", "mistix_ext2.inc", "mistix_mount.inc",
-        "mistix_net.inc", "vfs_base.img", "vfsd.elf", "blockd.elf",
+        "mistix_net.inc", "mistix_shm.inc", "vfs_base.img", "vfsd.elf", "blockd.elf",
+        "devd.elf", "netd.elf", "mistixdevd.pas", "mistixnetd.pas",
         "_binary_initfs_img_start", "userland/vfs/mistixvfsd.pas",
         "$(QEMU) -M pc",
     ))
     require(ROOT / "tools/mkinitfs.py", ("MFS1", "MFS1 supports at most 48 files"))
     require(ROOT / "README.md", (
-        "VFS サーバー", "ATA PIO", "Ext2", "RAM ブロックサーバー",
-        "FPC 実コンパイル", "未実施",
+        "VFS サーバー", "ATA PIO", "Ext2", "blockd", "Pascal の実コンパイル",
+        "未実施", "Phase 7", "shared-memory",
     ))
 
     forbidden = list(ROOT.rglob("*.c")) + list(ROOT.rglob("*.h"))
     if forbidden:
         fail(f"Unexpected C source/header: {forbidden[0].relative_to(ROOT)}")
 
-    print("[ OK ] Kernel include graph and Phase 6 subsystem ordering checked.")
+    print("[ OK ] Kernel include graph and Phase 7 subsystem ordering checked.")
     print("[ OK ] ATA PIO block layer, MBR scan, read-only Ext2 and mount metadata checked.")
     print("[ OK ] Ethernet/IPv4/UDP parser and packet self-test are present.")
-    print("[ OK ] Userland VFS RPC, RAM block RPC and capability bootstrap checked.")
+    print("[ OK ] Userland VFS RPC, shared-memory block RPC and capability bootstrap checked.")
+    print("[ OK ] Phase 7 per-process shared-memory mappings, transferable memory capabilities, and fork safety checked.")
+    print("[ OK ] VFS tmpfs overlay, device registry, and loopback UDP service checked.")
     print("[ OK ] MFS1 build graph and embedded service image symbols checked.")
     print("[NOTE] Structural checks do not replace FPC compilation or QEMU hardware testing.")
     return 0

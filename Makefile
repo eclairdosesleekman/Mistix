@@ -22,12 +22,14 @@ CAT_ELF := $(USER_BUILD_DIR)/cat.elf
 ECHO_ELF := $(USER_BUILD_DIR)/echo.elf
 VFSD_ELF := $(USER_BUILD_DIR)/vfsd.elf
 BLOCKD_ELF := $(USER_BUILD_DIR)/blockd.elf
+DEVD_ELF := $(USER_BUILD_DIR)/devd.elf
+NETD_ELF := $(USER_BUILD_DIR)/netd.elf
 VFS_BASEFS_IMG := $(BUILD_DIR)/vfs_base.img
 VFS_BASE_BLOB_OBJ := $(USER_BUILD_DIR)/vfs_base_blob.o
 INITFS_IMG := $(BUILD_DIR)/initfs.img
 INITFS_BLOB_OBJ := $(BUILD_DIR)/initfs_blob.o
 USER_BLOB_OBJ := $(BUILD_DIR)/user_init_blob.o
-ISO_IMAGE := $(BUILD_DIR)/mistix-phase6.iso
+ISO_IMAGE := $(BUILD_DIR)/mistix-phase7.iso
 SRC_DIR := src/kernel
 
 KERNEL_SOURCES := \
@@ -40,7 +42,7 @@ KERNEL_SOURCES := \
   $(SRC_DIR)/mistix_block.inc $(SRC_DIR)/mistix_ext2.inc \
   $(SRC_DIR)/mistix_mount.inc $(SRC_DIR)/mistix_net.inc \
   $(SRC_DIR)/mistix_vfs.inc $(SRC_DIR)/mistix_process.inc \
-  $(SRC_DIR)/mistix_syscall.inc $(SRC_DIR)/mistix_timer.inc \
+  $(SRC_DIR)/mistix_shm.inc $(SRC_DIR)/mistix_syscall.inc $(SRC_DIR)/mistix_timer.inc \
   $(SRC_DIR)/mistix_trap.inc $(SRC_DIR)/mistix_main.inc
 
 COMMON_INC := userland/common/mistixlib.inc
@@ -106,8 +108,20 @@ $(BLOCKD_ELF): userland/block/mistixblockd.pas $(COMMON_INC) userland/user.ld | 
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
-$(INITFS_IMG): $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) tools/mkinitfs.py docs/motd.txt | $(BUILD_DIR)
-	$(PYTHON) tools/mkinitfs.py $@ --file /bin/sh=$(SHELL_ELF) --file /bin/ls=$(LS_ELF) --file /bin/cat=$(CAT_ELF) --file /bin/echo=$(ECHO_ELF) --file /sbin/vfsd=$(VFSD_ELF) --file /sbin/blockd=$(BLOCKD_ELF) --file /etc/motd=docs/motd.txt
+$(DEVD_ELF): userland/device/mistixdevd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/device/mistixdevd.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixdevd.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
+
+$(NETD_ELF): userland/network/mistixnetd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/network/mistixnetd.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixnetd.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
+
+$(INITFS_IMG): $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) tools/mkinitfs.py docs/motd.txt | $(BUILD_DIR)
+	$(PYTHON) tools/mkinitfs.py $@ --file /bin/sh=$(SHELL_ELF) --file /bin/ls=$(LS_ELF) --file /bin/cat=$(CAT_ELF) --file /bin/echo=$(ECHO_ELF) --file /sbin/vfsd=$(VFSD_ELF) --file /sbin/blockd=$(BLOCKD_ELF) --file /sbin/devd=$(DEVD_ELF) --file /sbin/netd=$(NETD_ELF) --file /etc/motd=docs/motd.txt
 
 $(INITFS_BLOB_OBJ): $(INITFS_IMG) | $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(LD) -r -b binary -o initfs_blob.o initfs.img
@@ -125,18 +139,18 @@ $(KERNEL_ELF): $(KERNEL_OBJ) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ) linker.ld
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T linker.ld -o $@ $(KERNEL_OBJ) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ)
 
 user: user-verify
-user-verify: check-source $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(INITFS_IMG)
-	@echo 'Mistix Phase 6 Pascal userland and MFS1 images verified.'
+user-verify: check-source $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) $(INITFS_IMG)
+	@echo 'Mistix Phase 7 Pascal services, shared-memory ABI and InitFS images verified.'
 
 initfs: $(INITFS_IMG)
 kernel: check-source $(KERNEL_ELF)
-verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF)
+verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF)
 	@$(READELF) -h $(KERNEL_ELF) | grep -q ELF64
 	@if $(NM) -u $(KERNEL_ELF) 2>/dev/null | grep -q .; then echo 'Kernel has unresolved symbols'; $(NM) -u $(KERNEL_ELF); exit 1; fi
 	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_trap_dispatch$$'
 	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_user_init_elf_start$$'
 	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_initfs_img_start$$'
-	@echo 'Mistix Phase 6 ELF, InitFS, userland VFS and block services verified.'
+	@echo 'Mistix Phase 7 ELF, shared-memory ABI, VFS, block, device and network services verified.'
 
 check-tools:
 	@command -v $(FPC) >/dev/null || { echo 'Missing Free Pascal Compiler (fpc)'; exit 1; }

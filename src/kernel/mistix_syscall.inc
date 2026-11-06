@@ -25,6 +25,9 @@ const
   MISTIX_SYSCALL_GETCWD = 22;
   MISTIX_SYSCALL_SPAWN_PATH = 23;
   MISTIX_SYSCALL_GETCMDLINE = 24;
+  MISTIX_SYSCALL_SHM_CREATE = 25;
+  MISTIX_SYSCALL_SHM_MAP = 26;
+  MISTIX_SYSCALL_SHM_UNMAP = 27;
 
   MISTIX_SYSCALL_MAX_WRITE = 4096;
   MISTIX_ERR_BADF = $FFFFFFFFFFFFFFF7;
@@ -32,6 +35,7 @@ const
   MISTIX_ERR_INVAL = $FFFFFFFFFFFFFFEA;
   MISTIX_ERR_NOSYS = $FFFFFFFFFFFFFFDA;
   MISTIX_ERR_NOMEM = $FFFFFFFFFFFFFFF4;
+  MISTIX_ERR_BUSY = $FFFFFFFFFFFFFFF0;
 
 procedure SyscallISR; assembler; nostackframe; public name 'mistix_syscall_isr';
 asm
@@ -112,7 +116,11 @@ begin
 
     MISTIX_SYSCALL_FORK:
       begin
-        if ProcessForkCurrent(Frame, ChildPID) then
+        { SHM mappings have their own lifetime table and are not yet
+          integrated with the COW page-reference tracker. Do not clone them. }
+        if P7ShmProcessHasMappings(CurrentProcessIndex) then
+          ReturnValue := MISTIX_ERR_BUSY
+        else if ProcessForkCurrent(Frame, ChildPID) then
           ReturnValue := ChildPID
         else
           ReturnValue := MISTIX_ERR_NOMEM;
@@ -221,6 +229,17 @@ begin
     MISTIX_SYSCALL_GETCMDLINE:
       ReturnValue := ProcessCopyCommandLine(CurrentProcessIndex,
         Process^.AddressSpaceRoot, Frame^.SavedRDI, Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_SHM_CREATE:
+      ReturnValue := P7ShmCreate(CurrentProcessIndex, Frame^.SavedRDI);
+
+    MISTIX_SYSCALL_SHM_MAP:
+      ReturnValue := P7ShmMap(CurrentProcessIndex, Frame^.SavedRDI,
+        Frame^.SavedRSI, Frame^.SavedRDX <> 0);
+
+    MISTIX_SYSCALL_SHM_UNMAP:
+      ReturnValue := P7ShmUnmap(CurrentProcessIndex, Frame^.SavedRDI,
+        Frame^.SavedRSI);
   end;
 
   Frame^.SavedRAX := ReturnValue;

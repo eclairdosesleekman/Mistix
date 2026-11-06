@@ -19,15 +19,31 @@ const
   ShellPath: array[0..7] of Char = ('/','b','i','n','/','s','h',#0);
   VFSdPath: array[0..10] of Char = ('/','s','b','i','n','/','v','f','s','d',#0);
   BlockdPath: array[0..12] of Char = ('/','s','b','i','n','/','b','l','o','c','k','d',#0);
+  DevdPath: array[0..10] of Char = ('/','s','b','i','n','/','d','e','v','d',#0);
+  NetdPath: array[0..10] of Char = ('/','s','b','i','n','/','n','e','t','d',#0);
   EmptyArgs: array[0..0] of Char = (#0);
 
   VFS_RPC_PING  = $4D56534600000001;
   VFS_RPC_OPEN  = $4D56534600000002;
   VFS_RPC_READ  = $4D56534600000003;
   VFS_RPC_CLOSE = $4D56534600000004;
+  VFS_RPC_CREATE = $4D56534600000006;
+  VFS_RPC_WRITE = $4D56534600000007;
+  VFS_RPC_UNLINK = $4D56534600000008;
   BLOCK_RPC_INFO  = $4D424C4B00000001;
   BLOCK_RPC_READ  = $4D424C4B00000002;
   BLOCK_RPC_WRITE = $4D424C4B00000003;
+  DEV_RPC_REGISTER = $4D44455600000001;
+  DEV_RPC_LIST = $4D44455600000002;
+  NET_RPC_IFINFO = $4D4E455400000001;
+  NET_RPC_ARP_LOOKUP = $4D4E455400000002;
+  NET_RPC_UDP_ECHO = $4D4E455400000003;
+  SHARED_BYTES = 65536;
+
+var
+  SharedHandle: QWord;
+  SharedReady: Boolean;
+  SharedBuffer: PByte;
 
 procedure ClearMessage(var Message: TMistixIPCMessage);
 var
@@ -112,29 +128,57 @@ begin
   Result := True;
 end;
 
+function EnsureSharedMemory: Boolean;
+begin
+  Result := SharedReady;
+  if Result then Exit;
+  SharedHandle := SysShmCreate(16);
+  if IsError(SharedHandle) then Exit(False);
+  if IsError(SysShmMap(SharedHandle, MISTIX_SHM_DEFAULT_BASE, 1)) then Exit(False);
+  SharedBuffer := PByte(PtrUInt(MISTIX_SHM_DEFAULT_BASE));
+  SharedReady := True;
+  Result := True;
+end;
+
+function ShareMemoryWith(PID: QWord): Boolean;
+var
+  R: QWord;
+begin
+  Result := False;
+  if not EnsureSharedMemory then Exit;
+  R := SysCapabilityTransfer(PID, SharedHandle,
+    MISTIX_CAP_MAP or MISTIX_CAP_READ or MISTIX_CAP_WRITE or MISTIX_CAP_USER_MAP);
+  Result := not IsError(R);
+end;
+
 function TestVFSService: Boolean;
 var
   PID, RequestHandle, ReplyHandle, FileHandle, Count: QWord;
   Request, Response: TMistixIPCMessage;
   MotdPath: array[0..9] of Char;
+  TempPath: array[0..13] of Char;
+  Payload: array[0..24] of Char;
+  I: LongWord;
 begin
   Result := False;
   MotdPath[0] := '/'; MotdPath[1] := 'e'; MotdPath[2] := 't';
   MotdPath[3] := 'c'; MotdPath[4] := '/'; MotdPath[5] := 'm';
   MotdPath[6] := 'o'; MotdPath[7] := 't'; MotdPath[8] := 'd'; MotdPath[9] := #0;
+  if not EnsureSharedMemory then Exit;
   if not LaunchService(VFSdPath, PID, RequestHandle, ReplyHandle) then
   begin
     WriteCString('[FAIL] Could not start userland VFS server.'#13#10);
     Exit;
   end;
-  WriteCString('[ OK ] vfsd spawned; IPC capabilities transferred.'#13#10);
+  if not ShareMemoryWith(PID) then Exit;
+  WriteCString('[ OK ] vfsd spawned with shared-memory window.'#13#10);
 
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_PING;
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
-     (Response.Words[0] <> 1) then Exit;
-  WriteCString('[ OK ] VFS RPC handshake passed.'#13#10);
+     (Response.Words[0] <> 2) then Exit;
+  WriteCString('[ OK ] VFS RPC v2 handshake passed.'#13#10);
 
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_OPEN;
@@ -142,19 +186,19 @@ begin
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
   FileHandle := Response.Words[0];
-  WriteCString('[VFS] /etc/motd served by userland vfsd:'#13#10);
+  WriteCString('[VFS] /etc/motd via shared-memory READ:'#13#10);
 
   repeat
     ClearMessage(Request);
     Request.MessageId := VFS_RPC_READ;
     Request.WordCount := 2;
     Request.Words[0] := FileHandle;
-    Request.Words[1] := 40;
+    Request.Words[1] := SHARED_BYTES;
     if not RPCSend(RequestHandle, Request) or
        not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
     Count := Response.Words[0];
     if Count = 0 then Break;
-    SysWriteAll(1, PtrUInt(@Response.Words[1]), Count);
+    if not SysWriteAll(1, PtrUInt(SharedBuffer), Count) then Exit;
   until False;
 
   ClearMessage(Request);
@@ -163,7 +207,61 @@ begin
   Request.Words[0] := FileHandle;
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
-  WriteCString('[ OK ] VFS OPEN/READ/CLOSE RPC passed.'#13#10);
+
+  TempPath[0] := '/'; TempPath[1] := 't'; TempPath[2] := 'm'; TempPath[3] := 'p';
+  TempPath[4] := '/'; TempPath[5] := 'p'; TempPath[6] := 'h'; TempPath[7] := 'a';
+  TempPath[8] := 's'; TempPath[9] := 'e'; TempPath[10] := '7'; TempPath[11] := '.';
+  TempPath[12] := 't'; TempPath[13] := #0;
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_CREATE;
+  PackPath(Request, TempPath);
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_OPEN;
+  PackPath(Request, TempPath);
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+  FileHandle := Response.Words[0];
+  for I := 0 to High(Payload) do Payload[I] := #0;
+  Payload[0] := 'M'; Payload[1] := 'i'; Payload[2] := 's'; Payload[3] := 't';
+  Payload[4] := 'i'; Payload[5] := 'x'; Payload[6] := ' '; Payload[7] := 'P';
+  Payload[8] := 'h'; Payload[9] := 'a'; Payload[10] := 's'; Payload[11] := 'e';
+  Payload[12] := ' '; Payload[13] := '7'; Payload[14] := #13; Payload[15] := #10;
+  for I := 0 to 15 do SharedBuffer[I] := Ord(Payload[I]);
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_WRITE;
+  Request.WordCount := 2;
+  Request.Words[0] := FileHandle;
+  Request.Words[1] := 16;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
+     (Response.Words[0] <> 16) then Exit;
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_CLOSE;
+  Request.WordCount := 1;
+  Request.Words[0] := FileHandle;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_OPEN;
+  PackPath(Request, TempPath);
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+  FileHandle := Response.Words[0];
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_READ;
+  Request.WordCount := 2;
+  Request.Words[0] := FileHandle;
+  Request.Words[1] := 16;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
+     (Response.Words[0] <> 16) then Exit;
+  for I := 0 to 15 do
+    if SharedBuffer[I] <> Ord(Payload[I]) then Exit;
+  WriteCString('[ OK ] Writable tmpfs overlay create/write/read passed.'#13#10);
   Result := True;
 end;
 
@@ -172,39 +270,39 @@ var
   PID, RequestHandle, ReplyHandle: QWord;
   Request, Response: TMistixIPCMessage;
   I: LongWord;
-  Data: PByte;
   TestText: array[0..7] of Byte;
 begin
   Result := False;
+  if not EnsureSharedMemory then Exit;
   TestText[0] := Ord('M'); TestText[1] := Ord('I');
   TestText[2] := Ord('S'); TestText[3] := Ord('T');
   TestText[4] := Ord('I'); TestText[5] := Ord('X');
-  TestText[6] := Ord('6'); TestText[7] := Ord('!');
+  TestText[6] := Ord('7'); TestText[7] := Ord('!');
   if not LaunchService(BlockdPath, PID, RequestHandle, ReplyHandle) then
   begin
     WriteCString('[FAIL] Could not start block server.'#13#10);
     Exit;
   end;
-  WriteCString('[ OK ] blockd spawned; IPC capabilities transferred.'#13#10);
+  if not ShareMemoryWith(PID) then Exit;
+  WriteCString('[ OK ] blockd spawned with shared-memory DMA window.'#13#10);
 
   ClearMessage(Request);
   Request.MessageId := BLOCK_RPC_INFO;
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
-     (Response.Words[1] <> 512) then Exit;
-  WriteCString('[ OK ] blockd reports 512-byte sectors.'#13#10);
+     (Response.Words[1] <> 512) or (Response.Words[2] <> SHARED_BYTES) then Exit;
 
+  for I := 0 to High(TestText) do SharedBuffer[I] := TestText[I];
   ClearMessage(Request);
   Request.MessageId := BLOCK_RPC_WRITE;
-  Request.WordCount := 3;
+  Request.WordCount := 2;
   Request.Words[0] := 0;
   Request.Words[1] := SizeOf(TestText);
-  Data := PByte(@Request.Words[2]);
-  for I := 0 to High(TestText) do Data[I] := TestText[I];
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
      (Response.Words[0] <> SizeOf(TestText)) then Exit;
 
+  for I := 0 to High(TestText) do SharedBuffer[I] := 0;
   ClearMessage(Request);
   Request.MessageId := BLOCK_RPC_READ;
   Request.WordCount := 2;
@@ -213,10 +311,78 @@ begin
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
      (Response.Words[0] <> SizeOf(TestText)) then Exit;
-  Data := PByte(@Response.Words[1]);
   for I := 0 to High(TestText) do
-    if Data[I] <> TestText[I] then Exit;
-  WriteCString('[ OK ] RAM block server read/write round-trip passed.'#13#10);
+    if SharedBuffer[I] <> TestText[I] then Exit;
+  WriteCString('[ OK ] Shared-memory block READ/WRITE round-trip passed.'#13#10);
+  Result := True;
+end;
+
+function TestDeviceManager: Boolean;
+var
+  PID, RequestHandle, ReplyHandle: QWord;
+  Request, Response: TMistixIPCMessage;
+  NameBytes: PByte;
+begin
+  Result := False;
+  if not LaunchService(DevdPath, PID, RequestHandle, ReplyHandle) then Exit;
+  ClearMessage(Request);
+  Request.MessageId := DEV_RPC_REGISTER;
+  Request.WordCount := 6;
+  Request.Words[0] := 1; { class: character device }
+  Request.Words[1] := 1; { state: online }
+  NameBytes := PByte(@Request.Words[2]);
+  NameBytes[0] := Ord('s'); NameBytes[1] := Ord('e'); NameBytes[2] := Ord('r');
+  NameBytes[3] := Ord('i'); NameBytes[4] := Ord('a'); NameBytes[5] := Ord('l');
+  NameBytes[6] := Ord('0'); NameBytes[7] := 0;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+  ClearMessage(Request);
+  Request.MessageId := DEV_RPC_LIST;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
+     (Response.Words[0] = 0) then Exit;
+  WriteCString('[ OK ] Userland device-manager register/list RPC passed.'#13#10);
+  Result := True;
+end;
+
+function TestNetworkService: Boolean;
+var
+  PID, RequestHandle, ReplyHandle: QWord;
+  Request, Response: TMistixIPCMessage;
+  I: LongWord;
+  TestPayload: array[0..11] of Byte;
+begin
+  Result := False;
+  if not EnsureSharedMemory then Exit;
+  if not LaunchService(NetdPath, PID, RequestHandle, ReplyHandle) then Exit;
+  if not ShareMemoryWith(PID) then Exit;
+  ClearMessage(Request);
+  Request.MessageId := NET_RPC_IFINFO;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
+     (Response.Words[0] <> $7F000001) then Exit;
+  ClearMessage(Request);
+  Request.MessageId := NET_RPC_ARP_LOOKUP;
+  Request.WordCount := 1;
+  Request.Words[0] := $7F000001;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+  for I := 0 to High(TestPayload) do
+  begin
+    TestPayload[I] := Ord('A') + I;
+    SharedBuffer[I] := TestPayload[I];
+  end;
+  ClearMessage(Request);
+  Request.MessageId := NET_RPC_UDP_ECHO;
+  Request.WordCount := 2;
+  Request.Words[0] := 7000;
+  Request.Words[1] := SizeOf(TestPayload);
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
+     (Response.Words[0] <> SizeOf(TestPayload)) then Exit;
+  for I := 0 to High(TestPayload) do
+    if SharedBuffer[I] <> TestPayload[I] then Exit;
+  WriteCString('[ OK ] Loopback IPv4/UDP + ARP-cache RPC self-test passed.'#13#10);
   Result := True;
 end;
 
@@ -224,11 +390,15 @@ procedure MistixInitMain; cdecl; public name 'mistix_user_main';
 var
   PID, Status: QWord;
 begin
-  WriteCString(#13#10'Mistix Phase 6: userland storage services'#13#10);
+  WriteCString(#13#10'Mistix Phase 7: shared-memory services / VFS overlay / loopback network'#13#10);
   if not TestVFSService then
     WriteCString('[WARN] VFS service RPC test did not complete.'#13#10);
   if not TestBlockService then
     WriteCString('[WARN] Block service RPC test did not complete.'#13#10);
+  if not TestDeviceManager then
+    WriteCString('[WARN] Device-manager RPC test did not complete.'#13#10);
+  if not TestNetworkService then
+    WriteCString('[WARN] Network service RPC test did not complete.'#13#10);
   WriteCString(#13#10'Starting Mistix shell.'#13#10);
   repeat
     PID := SysSpawnPath(PtrUInt(@ShellPath[0]), PtrUInt(@EmptyArgs[0]), 0, 1);

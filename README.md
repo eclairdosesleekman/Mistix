@@ -1,82 +1,113 @@
-# Mistix Phase 6 — Storage services and filesystem groundwork
+# Mistix Phase 7 — Shared-memory services, writable VFS overlay, device registry and loopback networking
 
-Mistix Phase 6 は Phase 5 の Pascal カーネル／UNIX ユーザーランドを引き継ぎ、ストレージとサービス分離の次の段階を追加する開発スナップショットです。
+Mistix Phase 7 は Phase 6 の x86-64 / Limine / Pascal カーネルを引き継ぎ、プロセス間共有メモリとユーザーランドサービスのデータ転送を強化する開発スナップショットです。
 
-## Phase 6 の実装範囲
+## Phase 7 の主な追加機能
 
-### 実際に接続したユーザーランドサービス
+### 1. プロセスごとの Shared Memory
 
-- `vfsd`: 独立した Ring 3 プロセスとして起動する Pascal 製 VFS RPC サーバー
-- `blockd`: 独立した Ring 3 プロセスとして起動する Pascal 製 RAM ブロックサーバー
-- Capability Transfer によるサーバー Endpoint の受け渡し
-- リクエスト Endpoint と返信 Endpoint の分離
-- `vfsd` の MFS1 アーカイブ検証、`OPEN`、`READ`、`CLOSE`、`PING`
-- `blockd` の `INFO`、`READ`、`WRITE`（64 KiB の揮発性 RAM disk）
-- `init` から両サービスを spawn し、IPC RPC のラウンドトリップを検査
+`src/kernel/mistix_shm.inc` と syscall ABI 25–27 を追加しました。
 
-`vfsd` はビルド時に `/bin` と `/etc/motd` を含む MFS1 イメージを自身の ELF に埋め込みます。起動後、サービスはそのイメージをユーザーモードで読み取り、IPC 要求に応答します。IPC メッセージのペイロードは 6 個の `QWord` なので、パスは最大 39 文字、1 回の READ は最大 40 byte に制限しています。
+- `shm_create(page_count)` — PMM から連続でなくてもよい物理ページを確保し、プロセス専用 Capability を発行
+- `shm_map(handle, user_address, writable)` — 同じ物理ページを呼び出し元プロセスの PML4 にユーザー領域としてマップ
+- `shm_unmap(handle, user_address)` — 対応するプロセスマッピングを解除
+- Capability Transfer は Endpoint に加えて Memory Object をサポート
+- プロセス終了時に、そのプロセスの Shared Memory mapping を解除
+- 共有マッピングを保持するプロセスの `fork()` は `EBUSY` で拒否（COW 参照管理への統合前の安全策）
+- W^X を維持するため共有領域は NX とし、実行可能マッピングは許可しない
 
-### カーネル内ストレージ基盤
+上限は 16 オブジェクト、1 オブジェクト当たり最大16ページ（64 KiB）、全体で64マッピングです。現在は破棄・参照カウント API が未実装で、オブジェクトページはカーネル稼働中に保持されます。これは固定サイズの Phase 7 プロトタイプ上の制限です。
 
-- ATA PIO primary-master の IDENTIFY
-- LBA28 のポーリング READ SECTORS / WRITE SECTORS
-- MBR primary partition の検出
-- 読み取り専用 Ext2 の superblock / group descriptor / inode / directory lookup
-- Ext2 direct block による小さな通常ファイルの読み込み
-- mount namespace の最小テーブル
-- IPv4 header checksum と Ethernet / ARP / IPv4 / UDP frame parser
-- 合成 Ethernet/IPv4/UDP パケットを使ったパーサー自己テスト
+### 2. ユーザーランド VFS サーバー: MFS1 + writable `/tmp`
 
-## 重要なアーキテクチャー上の境界
+`vfsd` は独立した Ring 3 Pascal プロセスです。リクエスト／レスポンスは IPC、データ本体は共有メモリ窓を使用します。
 
-この Phase 6 は、VFS の完全なユーザーランド移行を完了したものではありません。
+RPC:
 
-- `vfsd` は独立した IPC サーバーとして実際に起動し、MFS1 のファイルを応答できます。
-- しかし、既存の `open/read/write/getdents` syscall は互換性維持のため、まだ Phase 5 のカーネル内 VFS を呼び出します。
-- `blockd` はサービス境界の IPC 試験用 RAM disk であり、物理 ATA デバイスをユーザーランドへ公開するドライバではありません。
-- ATA PIO ドライバと Ext2 読み取りコードはカーネル内にあります。VFS サーバーからブロックサーバーへ Ext2 I/O を IPC で委譲する接続は未完了です。
-- mount table は Ext2 mount metadata を保持しますが、Phase 5 VFS の pathname resolver とはまだ統合していません。
-- ネットワーク部はパケット解析コアのみです。NIC ドライバ、ARP cache、routing、TCP/UDP socket API、ユーザーランド network server は未実装です。
+- `PING`
+- `OPEN`
+- `READ`
+- `CLOSE`
+- `STAT`
+- `CREATE`
+- `WRITE`
+- `UNLINK`
 
-この構成を明確に分けたのは、動作していないマイクロカーネル移行を「完了」と誤認しないためです。次段階では、共有メモリを使う RPC、カーネル VFS syscall のサービス転送、ブロックサービスへの Ext2 I/O 委譲を行います。
+MFS1 アーカイブは read-only の lower layer、`/tmp` は最大8ファイル・各4 KiBの volatile upper layer です。書き込み可能領域を `/tmp/` に限定することで、組み込み実行ファイルや `/etc` を上書きしないようにしています。
 
-## Phase 6 のファイル
+**重要:** 既存の `open/read/write/getdents` syscall はまだカーネル内 Phase 5 VFS を使用します。Phase 7 では `vfsd` の RPC と共有メモリ転送を実装しましたが、全アプリケーションの標準 FD 操作を自動的に `vfsd` へ転送する syscall broker はまだ実装していません。完全な VFS 移行済みとは扱いません。
+
+### 3. Shared-memory block service
+
+`blockd` は64 KiBの揮発性 RAM disk をユーザーランドで管理します。READ/WRITE のデータ本体は共有メモリ経由で転送し、IPC メッセージにはオフセットと長さだけを格納します。
+
+このサービスは Phase 6 のテスト用 RAM disk を拡張したもので、物理 ATA PIO ドライバや Ext2 カーネルドライバにまだ接続されていません。DMA を実装したものではありません。
+
+### 4. Device Manager (`devd`)
+
+独立したユーザーランドデバイス登録サービスを追加しました。
+
+- `REGISTER`
+- `LIST`
+- `INFO`
+- `REMOVE`
+
+最大16デバイスを保持し、世代番号付き ID を使用します。現段階はメタデータの登録簿であり、PCI 列挙、ドライバ起動、デバイス Capability の発行は次段階です。
+
+### 5. Network service (`netd`)
+
+`netd` は共有メモリを用いた RPC インターフェースを持ち、以下を実装します。
+
+- loopback interface 情報 (`127.0.0.1`)
+- loopback の ARP cache lookup
+- Ethernet + IPv4 + UDP フレーム生成
+- IPv4 checksum と UDP pseudo-header checksum 検証
+- ソフトウェア UDP echo
+
+これはソフトウェア・ループバック NIC です。物理 NIC、PCI bus mastering、DMA descriptor ring、実際の Ethernet 送受信、TCP、routing は未実装です。
+
+## ソースツリー
 
 ```text
-mistix-phase6/
-├── boot/limine.conf
-├── linker.ld
+mistix-phase7/
 ├── Makefile
+├── linker.ld
+├── boot/limine.conf
 ├── src/kernel/
 │   ├── mistixkernel.pas
-│   ├── mistix_block.inc
-│   ├── mistix_ext2.inc
-│   ├── mistix_mount.inc
-│   ├── mistix_net.inc
-│   └── ... Phase 0–5 のカーネル基盤
+│   ├── mistix_shm.inc
+│   ├── mistix_process.inc
+│   ├── mistix_syscall.inc
+│   └── ... Phase 0–6 kernel sources
 ├── userland/
 │   ├── common/mistixlib.inc
 │   ├── init/mistixinit.pas
 │   ├── vfs/mistixvfsd.pas
 │   ├── block/mistixblockd.pas
+│   ├── device/mistixdevd.pas
+│   ├── network/mistixnetd.pas
 │   ├── sh/mistixsh.pas
 │   └── bin/{mistixls,mistixcat,mistixecho}.pas
 ├── tools/
-│   ├── mkinitfs.py
-│   └── check_source.py
+│   ├── check_source.py
+│   └── mkinitfs.py
 └── docs/
-    └── PHASE6-DESIGN.md
+    └── PHASE7-DESIGN.md
 ```
 
-## ビルド要件
+## Build
 
-- x86-64 Linux 開発ホスト
+開発ホストは Linux x86-64 を想定します。
+
+必要ツール:
+
 - Free Pascal Compiler (FPC)
 - GNU binutils (`ld`, `nm`, `readelf`)
+- GNU Make
 - Python 3
 - xorriso
 - QEMU (`qemu-system-x86_64`)
-- ビルド済み Limine v12 ツリー
+- ビルド済み Limine v12 tree
 
 ```sh
 make clean
@@ -89,26 +120,42 @@ make iso LIMINE_DIR=../limine
 make run LIMINE_DIR=../limine
 ```
 
-物理 ATA PIO デバイスを試す場合は、ディスクイメージを指定します。
+IDE primary-master の ATA PIO を試す場合:
 
 ```sh
 make run LIMINE_DIR=../limine DISK_IMAGE=../mistix-disk.img
 ```
 
-ディスクイメージを指定した `run` は、primary IDE PIO を提供する QEMU `pc` machine type で起動します。Q35 上で AHCI disk を使う場合は AHCI driver が必要であり、この Phase 6 の ATA PIO driver では検出できません。
+## Phase 7 起動時の自己テスト
+
+`init` は `vfsd`, `blockd`, `devd`, `netd` を spawn し、Endpoint と必要な Shared Memory Capability を個別に転送します。
+
+- VFS RPC v2 handshake
+- `/etc/motd` shared-memory read
+- `/tmp/phase7.t` create/write/read round-trip
+- blockd shared-memory bulk READ/WRITE round-trip
+- devd device register/list
+- netd loopback IFINFO / ARP lookup / UDP echo
+
+期待ログ例は `docs/PHASE7-DESIGN.md` に記載します。実機で取得したログではありません。
 
 ## 検証状況
 
-この生成環境には FPC と QEMU がないため、FPC 実コンパイルおよび QEMU 起動試験は未実施です。`make check-source` はソース構成・ABI 名・依存順序を調べる静的チェッカーであり、Pascal の型検査や実行時安全性を保証しません。GNU ld を使う ELF 埋め込み・Limine ISO の最終リンクも、開発ホストで再検証してください。
+この生成環境には FPC と QEMU がないため、Pascal の実コンパイルと QEMU 起動試験は未実施です。`make check-source` はソース構造・ABI の静的チェックであり、Pascal の型検査、ページテーブル実行時安全性、割り込み／スケジューラとの競合を保証しません。開発ホストで `make user-verify`、`make verify`、QEMU の serial log を必ず検証してください。
 
-## 制約
+## 未実装・既知の制約
 
-- ATA: primary master、PIO polling、LBA28 のみ。AHCI/NVMe、DMA、IRQ、secondary channel、slave、LBA48 は未対応。
-- MBR: primary partition 4 個まで。GPT/拡張パーティションは未対応。
-- Ext2: read-only。indirect block、HTree directory index、Extents、journal replay、symlink は未対応。direct block のみなので 12 * block size を超えるファイルは読めません。
-- `blockd`: 64 KiB volatile RAM disk。電源断・再起動で内容は消えます。ATA driver とは未接続。
-- `vfsd`: read-only MFS1 service。長い path、write/create/unlink/rename、directory enumeration、mount RPC は未対応。
-- VFS syscalls は現時点でカーネル内互換実装を利用します。
-- Network: parser/self-test のみ。ハードウェア NIC や送受信 path はありません。
-- single CPU 前提。SMP、完全な POSIX、動的リンク、TCP socket API は未対応。
-- カーネルとユーザーランドは Pascal。CPU 命令境界には Pascal ソース内の inline assembler を使用します。
+- 全標準 VFS syscall の userland VFS RPC broker 化
+- Shared Memory object destruction / reference counting
+- Shared Memory ページテーブル空階層の回収
+- Shared Memory マッピングを継承する `fork()` / COW 参照管理との統合（現段階は該当 `fork()` を EBUSY で拒否）
+- blockd と ATA PIO / Ext2 の接続
+- VFS server 内の Ext2 filesystem driver と block RPC mount
+- 書き込み可能な永続ディスク FS、journal、fsync
+- directory enumeration、symlink、hard link、permissions の完全実装
+- PCI/virtio/e1000 NIC driver、物理 ARP、DHCP、routing、TCP sockets
+- PCI device enumeration と device driver manager
+- blocking pipe、TTY canonical mode、signals、job control
+- SMP と完全な POSIX ABI
+
+Phase 7 は Pascal によるユーザーランドサービス境界と共有メモリ ABI を検証する段階です。ストレージ・ネットワークの実ハードウェア対応や完全な POSIX 互換を達成した段階ではありません。

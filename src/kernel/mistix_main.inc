@@ -70,7 +70,7 @@ var
 begin
   SerialInit;
   WriteText(#13#10'============================================================'#13#10);
-  WriteText(' Mistix - Phase 6: userland VFS / block / Ext2        '#13#10);
+  WriteText(' Mistix - Phase 7: shared memory / service IPC / network '#13#10);
   WriteText(' Pascal kernel / IPC VFS server / ATA PIO / Ext2 RO           '#13#10);
   WriteText('============================================================'#13#10);
 
@@ -96,6 +96,7 @@ begin
   MemoryObjectInitialize;
   COWInitialize;
   ProcessManagerInitialize;
+  P7ShmInitialize;
   BlockInitialize;
   Ext2Initialize;
   MountInitialize;
@@ -126,7 +127,7 @@ begin
     HaltForever;
   end;
 
-  WriteText(#13#10'[PHASE 6] Storage and userland service bootstrap initialised.'#13#10);
+  WriteText(#13#10'[PHASE 7] Shared-memory and userland service bootstrap initialised.'#13#10);
   IPCTestOK := IPCRendezvousSelfTest;
   NotificationTestOK := NotificationSelfTest;
   MemoryObjectTestOK := MemoryObjectAliasSelfTest;
@@ -158,9 +159,10 @@ begin
 
   SyscallInitialize;
   TimerInitialize;
-  WriteText(#13#10'[PASS] Phase 6 block, Ext2-RO, mount table, packet parser and userland services prepared.'#13#10);
+  WriteText(#13#10'[PASS] Phase 7 shared-memory ABI, service processes, and kernel foundations prepared.'#13#10);
   WriteText('[NOTE] Legacy open/read syscalls still use the Phase 5 in-kernel VFS compatibility path.'#13#10);
-  WriteText('[NOTE] vfsd serves MFS1 via IPC; blockd is a volatile RAM block-service prototype.'#13#10);
+  WriteText('[NOTE] vfsd serves MFS1 + volatile /tmp overlay via IPC; blockd uses shared-memory bulk I/O.'#13#10);
+  WriteText('[NOTE] devd is a userland device registry; netd exposes software loopback only.'#13#10);
   WriteText('[NOTE] Single CPU; legacy PIC/PIT; raw serial TTY; no SMP yet.'#13#10);
   WriteText('[NOTE] User syscalls: process/IPC, open/read/write/close, dup2, pipe,'#13#10);
   WriteText('       getdents, chdir, getcwd, spawn_path and getcmdline.'#13#10);

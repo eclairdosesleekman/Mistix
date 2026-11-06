@@ -861,6 +861,10 @@ var
   NewHandle: LongWord;
   Status: TKernelResult;
   PendingIndex: LongWord;
+  SlotEncoded: LongWord;
+  Slot: LongWord;
+  SourceKind: TObjectKind;
+  AllowedRights: LongWord;
 begin
   Result := QWord(-1); { -EPERM }
   if SourceIndex >= PROCESS_MAX_COUNT then Exit;
@@ -871,17 +875,50 @@ begin
   end;
   if (ProcessTable[TargetIndex].ParentPID <> ProcessTable[SourceIndex].PID) or
      (ProcessTable[TargetIndex].State = psZombie) then Exit;
+
+  SlotEncoded := SourceHandle and $FFFF;
+  if (SlotEncoded = 0) or (SlotEncoded > CAPABILITY_MAX_SLOTS) then
+  begin
+    Result := QWord(-9);
+    Exit;
+  end;
+  Slot := SlotEncoded - 1;
+  if (ProcessTable[SourceIndex].Capabilities.Entries[Slot].Active = 0) or
+     (ProcessTable[SourceIndex].Capabilities.Entries[Slot].Generation <>
+       Word(SourceHandle shr 16)) then
+  begin
+    Result := QWord(-9);
+    Exit;
+  end;
+  if ProcessTable[SourceIndex].Capabilities.Entries[Slot].ObjectKind >
+     Ord(okMemoryObject) then
+  begin
+    Result := QWord(-9);
+    Exit;
+  end;
+  SourceKind := TObjectKind(
+    ProcessTable[SourceIndex].Capabilities.Entries[Slot].ObjectKind);
+  case SourceKind of
+    okEndpoint:
+      AllowedRights := CAP_RIGHT_SEND or CAP_RIGHT_RECEIVE;
+    okMemoryObject:
+      AllowedRights := CAP_RIGHT_MAP or CAP_RIGHT_READ or CAP_RIGHT_WRITE or
+                       CAP_RIGHT_USER_MAP;
+  else
+    Result := QWord(-22);
+    Exit;
+  end;
+
   Status := ProcessCapabilityLookup(ProcessTable[SourceIndex].Capabilities,
-    SourceHandle, CAP_RIGHT_TRANSFER, okEndpoint, ObjectIndex, ObjectGeneration);
+    SourceHandle, CAP_RIGHT_TRANSFER, SourceKind, ObjectIndex, ObjectGeneration);
   if Status <> krSuccess then Exit;
-  if (RequestedRights = 0) or
-     ((RequestedRights and not (CAP_RIGHT_SEND or CAP_RIGHT_RECEIVE)) <> 0) then
+  if (RequestedRights = 0) or ((RequestedRights and not AllowedRights) <> 0) then
   begin
     Result := QWord(-22);
     Exit;
   end;
-  if (ProcessTable[SourceIndex].Capabilities.Entries[
-      (SourceHandle and $FFFF) - 1].Rights and RequestedRights) <> RequestedRights then
+  if (ProcessTable[SourceIndex].Capabilities.Entries[Slot].Rights and
+      RequestedRights) <> RequestedRights then
   begin
     Result := QWord(-1);
     Exit;
@@ -892,7 +929,7 @@ begin
     Exit;
   end;
   Status := ProcessCapabilityInstall(ProcessTable[TargetIndex].Capabilities,
-    okEndpoint, ObjectIndex, ObjectGeneration, RequestedRights, NewHandle);
+    SourceKind, ObjectIndex, ObjectGeneration, RequestedRights, NewHandle);
   if Status <> krSuccess then
   begin
     Result := QWord(-24);
@@ -920,12 +957,15 @@ begin
     ProcessTable[ProcessIndex].PendingCapabilityCount] := 0;
 end;
 
+procedure P7ShmReleaseProcess(ProcessIndex: LongWord); forward;
+
 procedure ProcessTerminateIndex(ProcessIndex: LongWord; ExitCode: QWord);
 begin
   if ProcessIndex >= PROCESS_MAX_COUNT then Exit;
   if (ProcessTable[ProcessIndex].State = psFree) or
      (ProcessTable[ProcessIndex].State = psZombie) then Exit;
   ProcessTable[ProcessIndex].ExitCode := ExitCode;
+  P7ShmReleaseProcess(ProcessIndex);
   VFSProcessCloseAll(ProcessTable[ProcessIndex].Files);
   ProcessTable[ProcessIndex].State := psZombie;
   ProcessWakeParentOnExit(ProcessIndex);

@@ -21,8 +21,9 @@ const
   BLOCK_RPC_WRITE = $4D424C4B00000003;
   BLOCK_RPC_SECTOR_SIZE = 512;
   BLOCK_RAMDISK_BYTES = 65536;
-  BLOCK_RPC_READ_MAX = 40;
-  BLOCK_RPC_WRITE_MAX = 32;
+  BLOCK_RPC_READ_MAX = BLOCK_RAMDISK_BYTES;
+  BLOCK_RPC_WRITE_MAX = BLOCK_RAMDISK_BYTES;
+  BLOCK_SHARED_BASE = MISTIX_SHM_DEFAULT_BASE;
   BLOCK_ERR_INVAL = QWord(-22);
   BLOCK_ERR_RANGE = QWord(-34);
 
@@ -33,6 +34,8 @@ var
   RAMDisk: TRAMBlockDevice;
   RequestEndpoint: QWord;
   ReplyEndpoint: QWord;
+  SharedHandle: QWord;
+  SharedBuffer: PByte;
 
 procedure ClearMessage(var Message: TMistixIPCMessage);
 var
@@ -44,39 +47,40 @@ begin
   for I := 0 to 5 do Message.Words[I] := 0;
 end;
 
-function ReceiveCapabilities: Boolean;
+function ReceiveOneCapability(out Handle: QWord): Boolean;
 var
-  A, B: QWord;
   Retry: LongWord;
 begin
   Result := False;
-  A := 0;
-  B := 0;
+  Handle := 0;
   Retry := 0;
-  while (IsError(A) or (A = 0)) and (Retry < 1000000) do
+  while Retry < 1000000 do
   begin
-    A := SysCapabilityReceive;
-    if IsError(A) then
+    Handle := SysCapabilityReceive;
+    if not IsError(Handle) then
     begin
-      if A <> MISTIX_EAGAIN then Exit;
-      SysYield;
+      Result := Handle <> 0;
+      Exit;
     end;
+    if Handle <> MISTIX_EAGAIN then Exit;
+    SysYield;
     Inc(Retry);
   end;
-  Retry := 0;
-  while (IsError(B) or (B = 0)) and (Retry < 1000000) do
-  begin
-    B := SysCapabilityReceive;
-    if IsError(B) then
-    begin
-      if B <> MISTIX_EAGAIN then Exit;
-      SysYield;
-    end;
-    Inc(Retry);
-  end;
-  if IsError(A) or IsError(B) then Exit;
+end;
+
+function ReceiveCapabilities: Boolean;
+var
+  A, B, C: QWord;
+begin
+  Result := False;
+  if not ReceiveOneCapability(A) then Exit;
+  if not ReceiveOneCapability(B) then Exit;
+  if not ReceiveOneCapability(C) then Exit;
   RequestEndpoint := A;
   ReplyEndpoint := B;
+  SharedHandle := C;
+  if IsError(SysShmMap(SharedHandle, BLOCK_SHARED_BASE, 1)) then Exit;
+  SharedBuffer := PByte(PtrUInt(BLOCK_SHARED_BASE));
   Result := True;
 end;
 
@@ -93,9 +97,10 @@ begin
     BLOCK_RPC_INFO:
       begin
         Response.MessageId := 0;
-        Response.WordCount := 2;
+        Response.WordCount := 3;
         Response.Words[0] := BLOCK_RAMDISK_BYTES div BLOCK_RPC_SECTOR_SIZE;
         Response.Words[1] := BLOCK_RPC_SECTOR_SIZE;
+        Response.Words[2] := BLOCK_RAMDISK_BYTES;
       end;
     BLOCK_RPC_READ:
       begin
@@ -109,16 +114,16 @@ begin
           Response.MessageId := BLOCK_ERR_RANGE;
           Exit;
         end;
-        Dest := PByte(@Response.Words[1]);
+        Dest := SharedBuffer;
         for I := 0 to LongWord(Count) - 1 do
           Dest[I] := RAMDisk[Offset + I];
         Response.MessageId := 0;
-        Response.WordCount := 6;
+        Response.WordCount := 1;
         Response.Words[0] := Count;
       end;
     BLOCK_RPC_WRITE:
       begin
-        if Request.WordCount < 3 then Exit;
+        if Request.WordCount < 2 then Exit;
         Offset := Request.Words[0];
         Count := Request.Words[1];
         if (Count = 0) or (Count > BLOCK_RPC_WRITE_MAX) or
@@ -128,7 +133,7 @@ begin
           Response.MessageId := BLOCK_ERR_RANGE;
           Exit;
         end;
-        Source := PByte(@Request.Words[2]);
+        Source := SharedBuffer;
         for I := 0 to LongWord(Count) - 1 do
           RAMDisk[Offset + I] := Source[I];
         Response.MessageId := 0;
@@ -144,7 +149,7 @@ var
   Status: QWord;
 begin
   if not ReceiveCapabilities then SysExit(20);
-  WriteCString('blockd: 128-sector volatile RAM block device online'#13#10);
+  WriteCString('blockd: 128-sector RAM disk with shared-memory bulk-transfer window online'#13#10);
   while True do
   begin
     Status := SysIPCReceive(RequestEndpoint, PtrUInt(@Request));

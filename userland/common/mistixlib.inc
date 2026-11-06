@@ -29,6 +29,15 @@ const
   MISTIX_SYSCALL_CAP_CLOSE = 13;
   MISTIX_CAP_SEND = $00000001;
   MISTIX_CAP_RECEIVE = $00000002;
+  MISTIX_CAP_MAP = $00000010;
+  MISTIX_CAP_READ = $00000020;
+  MISTIX_CAP_WRITE = $00000040;
+  MISTIX_CAP_USER_MAP = $00000100;
+  MISTIX_CAP_TRANSFER = $00000400;
+  MISTIX_SYSCALL_SHM_CREATE = 25;
+  MISTIX_SYSCALL_SHM_MAP = 26;
+  MISTIX_SYSCALL_SHM_UNMAP = 27;
+  MISTIX_SHM_DEFAULT_BASE = QWord($0000500000000000);
 
 type
   TMistixIPCMessage = packed record
@@ -151,6 +160,24 @@ end;
 function SysCapabilityClose(Handle: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_CAP_CLOSE
+  int $80
+end;
+
+function SysShmCreate(PageCount: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_SHM_CREATE
+  int $80
+end;
+
+function SysShmMap(Handle, BaseAddress, Writable: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_SHM_MAP
+  int $80
+end;
+
+function SysShmUnmap(Handle, BaseAddress: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_SHM_UNMAP
   int $80
 end;
 

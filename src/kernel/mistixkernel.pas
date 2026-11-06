@@ -30,6 +30,7 @@ implementation
 {$I mistix_net.inc}
 {$I mistix_vfs.inc}
 {$I mistix_process.inc}
+{$I mistix_shm.inc}
 {$I mistix_syscall.inc}
 {$I mistix_timer.inc}
 {$I mistix_trap.inc}

@@ -21,9 +21,15 @@ const
   VFS_RPC_READ  = $4D56534600000003;
   VFS_RPC_CLOSE = $4D56534600000004;
   VFS_RPC_STAT  = $4D56534600000005;
+  VFS_RPC_CREATE = $4D56534600000006;
+  VFS_RPC_WRITE = $4D56534600000007;
+  VFS_RPC_UNLINK = $4D56534600000008;
   VFS_OPEN_MAX = 8;
   VFS_RPC_PATH_BYTES = 40;
-  VFS_RPC_READ_MAX = 40;
+  VFS_RPC_READ_MAX = 65536;
+  VFS_TEMP_MAX = 8;
+  VFS_TEMP_FILE_MAX = 4096;
+  VFS_SHARED_BASE = MISTIX_SHM_DEFAULT_BASE;
   VFS_ERR_NOENT = QWord(-2);
   VFS_ERR_BADF = QWord(-9);
   VFS_ERR_INVAL = QWord(-22);
@@ -44,9 +50,18 @@ type
   TVFSOpenSlot = record
     Active: Byte;
     Generation: Word;
+    SourceKind: Byte; { 0=MFS1 archive, 1=tmpfs }
+    TempIndex: SmallInt;
     DataOffset: QWord;
     DataSize: QWord;
     Position: QWord;
+  end;
+
+  TTempFile = record
+    Active: Byte;
+    Path: array[0..127] of Char;
+    Data: array[0..VFS_TEMP_FILE_MAX - 1] of Byte;
+    Size: QWord;
   end;
 
 var
@@ -57,6 +72,8 @@ var
   ReplyEndpoint: QWord;
   ImageBase: Pointer;
   ImageSize: QWord;
+  SharedBuffer: PByte;
+  TempFiles: array[0..VFS_TEMP_MAX - 1] of TTempFile;
 
 function ByteAt(Base: Pointer; Offset: QWord): Byte; inline;
 begin
@@ -205,7 +222,8 @@ begin
   Valid := Terminated and (Path[0] = '/');
 end;
 
-function AllocateOpen(DataOffset, DataSize: QWord): QWord;
+function AllocateOpen(DataOffset, DataSize: QWord; SourceKind: Byte;
+  TempIndex: SmallInt): QWord;
 var
   I: LongWord;
 begin
@@ -216,10 +234,73 @@ begin
       if OpenSlots[I].Generation = High(Word) then Continue;
       Inc(OpenSlots[I].Generation);
       OpenSlots[I].Active := 1;
+      OpenSlots[I].SourceKind := SourceKind;
+      OpenSlots[I].TempIndex := TempIndex;
       OpenSlots[I].DataOffset := DataOffset;
       OpenSlots[I].DataSize := DataSize;
       OpenSlots[I].Position := 0;
       Result := (QWord(OpenSlots[I].Generation) shl 16) or (I + 1);
+      Exit;
+    end;
+end;
+
+function TempFind(const Path: array of Char): LongInt;
+var
+  I, J, L: LongWord;
+  Match: Boolean;
+begin
+  Result := -1;
+  L := CLength(Path);
+  for I := 0 to VFS_TEMP_MAX - 1 do
+  begin
+    if TempFiles[I].Active = 0 then Continue;
+    Match := True;
+    for J := 0 to L do
+      if TempFiles[I].Path[J] <> Path[J] then
+      begin
+        Match := False;
+        Break;
+      end;
+    if Match then
+    begin
+      Result := I;
+      Exit;
+    end;
+  end;
+end;
+
+function TempPathAllowed(const Path: array of Char): Boolean;
+begin
+  { Writable overlay is deliberately restricted to /tmp. }
+  Result := (Path[0] = '/') and (Path[1] = 't') and
+    (Path[2] = 'm') and (Path[3] = 'p') and (Path[4] = '/') and
+    (Path[5] <> #0);
+end;
+
+function TempCreate(const Path: array of Char): LongInt;
+var
+  I, J, L: LongWord;
+  Existing: LongInt;
+begin
+  Result := -1;
+  L := CLength(Path);
+  if (L < 6) or (L > 127) or not TempPathAllowed(Path) then Exit;
+  Existing := TempFind(Path);
+  if Existing >= 0 then
+  begin
+    TempFiles[Existing].Size := 0;
+    Result := Existing;
+    Exit;
+  end;
+  for I := 0 to VFS_TEMP_MAX - 1 do
+    if TempFiles[I].Active = 0 then
+    begin
+      TempFiles[I].Active := 1;
+      TempFiles[I].Size := 0;
+      for J := 0 to 127 do
+        if J <= L then TempFiles[I].Path[J] := Path[J]
+        else TempFiles[I].Path[J] := #0;
+      Result := I;
       Exit;
     end;
 end;
@@ -249,7 +330,8 @@ var
   DataOffset, DataSize, Requested, Available: QWord;
   Slot: LongWord;
   I: LongWord;
-  Dest: PByte;
+  Dest, Source: PByte;
+  TempIndex: LongInt;
 begin
   ClearMessage(Response);
   Response.MessageId := VFS_ERR_INVAL;
@@ -257,9 +339,10 @@ begin
     VFS_RPC_PING:
       begin
         Response.MessageId := 0;
-        Response.WordCount := 2;
-        Response.Words[0] := 1; { protocol version }
-        Response.Words[1] := ReadLE32(ImageBase, 8); { file count }
+        Response.WordCount := 3;
+        Response.Words[0] := 2; { RPC protocol version }
+        Response.Words[1] := ReadLE32(ImageBase, 8);
+        Response.Words[2] := VFS_TEMP_MAX;
       end;
 
     VFS_RPC_OPEN, VFS_RPC_STAT:
@@ -267,7 +350,13 @@ begin
         if Request.WordCount < 5 then Exit;
         CopyRequestPath(Request, Path, ValidPath);
         if not ValidPath then Exit;
-        if not ArchiveFind(Path, DataOffset, DataSize) then
+        TempIndex := TempFind(Path);
+        if TempIndex >= 0 then
+        begin
+          DataOffset := 0;
+          DataSize := TempFiles[TempIndex].Size;
+        end
+        else if not ArchiveFind(Path, DataOffset, DataSize) then
         begin
           Response.MessageId := VFS_ERR_NOENT;
           Exit;
@@ -278,9 +367,32 @@ begin
           Response.Words[0] := DataSize
         else
         begin
-          Response.Words[0] := AllocateOpen(DataOffset, DataSize);
+          if TempIndex >= 0 then
+            Response.Words[0] := AllocateOpen(0, DataSize, 1, TempIndex)
+          else
+            Response.Words[0] := AllocateOpen(DataOffset, DataSize, 0, -1);
           if IsError(Response.Words[0]) then
             Response.MessageId := Response.Words[0];
+        end;
+      end;
+
+    VFS_RPC_CREATE:
+      begin
+        if Request.WordCount < 5 then Exit;
+        CopyRequestPath(Request, Path, ValidPath);
+        if not ValidPath or not TempPathAllowed(Path) then
+        begin
+          Response.MessageId := VFS_ERR_ROFS;
+          Exit;
+        end;
+        TempIndex := TempCreate(Path);
+        if TempIndex < 0 then
+          Response.MessageId := VFS_ERR_NOSPC
+        else
+        begin
+          Response.MessageId := 0;
+          Response.WordCount := 1;
+          Response.Words[0] := TempIndex;
         end;
       end;
 
@@ -294,17 +406,93 @@ begin
         end;
         Requested := Request.Words[1];
         if Requested > VFS_RPC_READ_MAX then Requested := VFS_RPC_READ_MAX;
-        Available := OpenSlots[Slot].DataSize - OpenSlots[Slot].Position;
+        if OpenSlots[Slot].Position >= OpenSlots[Slot].DataSize then
+          Available := 0
+        else
+          Available := OpenSlots[Slot].DataSize - OpenSlots[Slot].Position;
         if Requested > Available then Requested := Available;
-        Response.MessageId := 0;
-        Response.WordCount := 6;
-        Response.Words[0] := Requested;
-        Dest := PByte(@Response.Words[1]);
+        if Requested > 65536 then Requested := 65536;
+        Dest := SharedBuffer;
         if Requested <> 0 then
-          for I := 0 to LongWord(Requested) - 1 do
-            Dest[I] := ByteAt(ImageBase,
-              OpenSlots[Slot].DataOffset + OpenSlots[Slot].Position + I);
+        begin
+          if OpenSlots[Slot].SourceKind = 1 then
+          begin
+            TempIndex := OpenSlots[Slot].TempIndex;
+            if (TempIndex < 0) or (TempIndex >= VFS_TEMP_MAX) or
+               (TempFiles[TempIndex].Active = 0) then
+            begin
+              Response.MessageId := VFS_ERR_BADF;
+              Exit;
+            end;
+            Source := @TempFiles[TempIndex].Data[OpenSlots[Slot].Position];
+            for I := 0 to LongWord(Requested) - 1 do Dest[I] := Source[I];
+          end
+          else
+            for I := 0 to LongWord(Requested) - 1 do
+              Dest[I] := ByteAt(ImageBase,
+                OpenSlots[Slot].DataOffset + OpenSlots[Slot].Position + I);
+        end;
         Inc(OpenSlots[Slot].Position, Requested);
+        Response.MessageId := 0;
+        Response.WordCount := 1;
+        Response.Words[0] := Requested;
+      end;
+
+    VFS_RPC_WRITE:
+      begin
+        if Request.WordCount < 2 then Exit;
+        if not LookupOpen(Request.Words[0], Slot) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        if OpenSlots[Slot].SourceKind <> 1 then
+        begin
+          Response.MessageId := VFS_ERR_ROFS;
+          Exit;
+        end;
+        TempIndex := OpenSlots[Slot].TempIndex;
+        if (TempIndex < 0) or (TempIndex >= VFS_TEMP_MAX) or
+           (TempFiles[TempIndex].Active = 0) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        Requested := Request.Words[1];
+        if Requested > 65536 then Requested := 65536;
+        if (OpenSlots[Slot].Position > VFS_TEMP_FILE_MAX) or
+           (Requested > VFS_TEMP_FILE_MAX - OpenSlots[Slot].Position) then
+        begin
+          Response.MessageId := VFS_ERR_NOSPC;
+          Exit;
+        end;
+        Source := SharedBuffer;
+        Dest := @TempFiles[TempIndex].Data[OpenSlots[Slot].Position];
+        if Requested <> 0 then
+          for I := 0 to LongWord(Requested) - 1 do Dest[I] := Source[I];
+        Inc(OpenSlots[Slot].Position, Requested);
+        if OpenSlots[Slot].Position > TempFiles[TempIndex].Size then
+          TempFiles[TempIndex].Size := OpenSlots[Slot].Position;
+        OpenSlots[Slot].DataSize := TempFiles[TempIndex].Size;
+        Response.MessageId := 0;
+        Response.WordCount := 1;
+        Response.Words[0] := Requested;
+      end;
+
+    VFS_RPC_UNLINK:
+      begin
+        if Request.WordCount < 5 then Exit;
+        CopyRequestPath(Request, Path, ValidPath);
+        if not ValidPath then Exit;
+        TempIndex := TempFind(Path);
+        if TempIndex < 0 then
+        begin
+          Response.MessageId := VFS_ERR_ROFS;
+          Exit;
+        end;
+        TempFiles[TempIndex].Active := 0;
+        TempFiles[TempIndex].Size := 0;
+        Response.MessageId := 0;
       end;
 
     VFS_RPC_CLOSE:
@@ -319,6 +507,7 @@ begin
         OpenSlots[Slot].DataOffset := 0;
         OpenSlots[Slot].DataSize := 0;
         OpenSlots[Slot].Position := 0;
+        OpenSlots[Slot].TempIndex := -1;
         Response.MessageId := 0;
       end;
   else
@@ -326,39 +515,39 @@ begin
   end;
 end;
 
-function ReceiveCapabilities: Boolean;
+function ReceiveOneCapability(out Handle: QWord): Boolean;
 var
-  FirstHandle, SecondHandle: QWord;
   Retry: LongWord;
 begin
   Result := False;
-  FirstHandle := 0;
-  SecondHandle := 0;
+  Handle := 0;
   Retry := 0;
-  while (IsError(FirstHandle) or (FirstHandle = 0)) and (Retry < 1000000) do
+  while Retry < 1000000 do
   begin
-    FirstHandle := SysCapabilityReceive;
-    if IsError(FirstHandle) then
+    Handle := SysCapabilityReceive;
+    if not IsError(Handle) then
     begin
-      if FirstHandle <> MISTIX_EAGAIN then Exit;
-      SysYield;
+      Result := Handle <> 0;
+      Exit;
     end;
+    if Handle <> MISTIX_EAGAIN then Exit;
+    SysYield;
     Inc(Retry);
   end;
-  Retry := 0;
-  while (IsError(SecondHandle) or (SecondHandle = 0)) and (Retry < 1000000) do
-  begin
-    SecondHandle := SysCapabilityReceive;
-    if IsError(SecondHandle) then
-    begin
-      if SecondHandle <> MISTIX_EAGAIN then Exit;
-      SysYield;
-    end;
-    Inc(Retry);
-  end;
-  if IsError(FirstHandle) or IsError(SecondHandle) then Exit;
+end;
+
+function ReceiveCapabilities: Boolean;
+var
+  FirstHandle, SecondHandle, SharedHandle: QWord;
+begin
+  Result := False;
+  if not ReceiveOneCapability(FirstHandle) then Exit;
+  if not ReceiveOneCapability(SecondHandle) then Exit;
+  if not ReceiveOneCapability(SharedHandle) then Exit;
   RequestEndpoint := FirstHandle;
   ReplyEndpoint := SecondHandle;
+  if IsError(SysShmMap(SharedHandle, VFS_SHARED_BASE, 1)) then Exit;
+  SharedBuffer := PByte(PtrUInt(VFS_SHARED_BASE));
   Result := True;
 end;
 
@@ -379,7 +568,7 @@ begin
     WriteCString('vfsd: missing IPC capabilities'#13#10);
     SysExit(11);
   end;
-  WriteCString('vfsd: userland VFS service online (MFS1 read-only)'#13#10);
+  WriteCString('vfsd: userland VFS online (MFS1 base + writable /tmp overlay)'#13#10);
   while True do
   begin
     Status := SysIPCReceive(RequestEndpoint, PtrUInt(@Request));
