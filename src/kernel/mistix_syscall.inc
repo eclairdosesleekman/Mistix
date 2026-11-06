@@ -1,68 +1,33 @@
-{ Mistix Phase 3: ring-3 software interrupt gate and checked syscall ABI.
-  ABI: RAX=number; RDI, RSI, RDX are arguments; RAX is the result.
-  This bootstrap ABI is intentionally tiny: write, exit, getpid, yield. }
+{ Mistix Phase 4 syscall ABI. RAX=number/result, args in RDI/RSI/RDX. }
 
 const
   MISTIX_SYSCALL_WRITE = 1;
   MISTIX_SYSCALL_EXIT = 2;
   MISTIX_SYSCALL_GETPID = 3;
   MISTIX_SYSCALL_YIELD = 4;
-  MISTIX_SYSCALL_MAX_WRITE = 4096;
+  MISTIX_SYSCALL_FORK = 5;
+  MISTIX_SYSCALL_SPAWN = 6;
+  MISTIX_SYSCALL_WAITPID = 7;
+  MISTIX_SYSCALL_ENDPOINT_CREATE = 8;
+  MISTIX_SYSCALL_IPC_SEND = 9;
+  MISTIX_SYSCALL_IPC_RECEIVE = 10;
+  MISTIX_SYSCALL_CAP_TRANSFER = 11;
+  MISTIX_SYSCALL_CAP_RECEIVE = 12;
+  MISTIX_SYSCALL_CAP_CLOSE = 13;
+  MISTIX_SYSCALL_KILL = 14;
 
+  MISTIX_SYSCALL_MAX_WRITE = 4096;
   MISTIX_ERR_BADF = $FFFFFFFFFFFFFFF7;
   MISTIX_ERR_FAULT = $FFFFFFFFFFFFFFF2;
   MISTIX_ERR_INVAL = $FFFFFFFFFFFFFFEA;
   MISTIX_ERR_NOSYS = $FFFFFFFFFFFFFFDA;
+  MISTIX_ERR_NOMEM = $FFFFFFFFFFFFFFF4;
 
-procedure SyscallISR; assembler; nostackframe;
-  public name 'mistix_syscall_isr';
+procedure SyscallISR; assembler; nostackframe; public name 'mistix_syscall_isr';
 asm
   push 0
   push 128
-  jmp mistix_syscall_common
-end;
-
-procedure SyscallCommon; assembler; nostackframe;
-  public name 'mistix_syscall_common';
-asm
-  cld
-  push rax
-  push rbx
-  push rcx
-  push rdx
-  push rbp
-  push rsi
-  push rdi
-  push r8
-  push r9
-  push r10
-  push r11
-  push r12
-  push r13
-  push r14
-  push r15
-  mov r12, rsp
-  mov rdi, r12
-  and rsp, -16
-  call mistix_syscall_dispatch
-  mov rsp, r12
-  pop r15
-  pop r14
-  pop r13
-  pop r12
-  pop r11
-  pop r10
-  pop r9
-  pop r8
-  pop rdi
-  pop rsi
-  pop rbp
-  pop rdx
-  pop rcx
-  pop rbx
-  pop rax
-  add rsp, 16
-  iretq
+  jmp mistix_isr_common
 end;
 
 procedure SyscallInitialize;
@@ -73,53 +38,49 @@ begin
   WriteText('[ OK ] DPL-3 int 0x80 syscall gate installed.'#13#10);
 end;
 
-procedure SyscallWriteUserBuffer(Process: PKernelProcess;
-  FileDescriptor: QWord; BufferAddress, ByteCount: QWord;
-  var ReturnValue: QWord);
+function SyscallWriteUserBuffer(Process: PKernelProcess;
+  FileDescriptor, BufferAddress, ByteCount: QWord): QWord;
 var
+  Buffer: array[0..MISTIX_SYSCALL_MAX_WRITE - 1] of Byte;
   I: QWord;
-  Source: PByte;
 begin
-  if (FileDescriptor <> 1) and (FileDescriptor <> 2) then
-  begin
-    ReturnValue := MISTIX_ERR_BADF;
-    Exit;
-  end;
+  Result := MISTIX_ERR_BADF;
+  if (FileDescriptor <> 1) and (FileDescriptor <> 2) then Exit;
   if ByteCount = 0 then
   begin
-    ReturnValue := 0;
+    Result := 0;
     Exit;
   end;
   if ByteCount > MISTIX_SYSCALL_MAX_WRITE then
   begin
-    ReturnValue := MISTIX_ERR_INVAL;
+    Result := MISTIX_ERR_INVAL;
     Exit;
   end;
-  if not AddressSpaceValidateUserRange(Process^.AddressSpaceRoot,
-                                        BufferAddress, ByteCount) then
+  if not AddressSpaceCopyFrom(Process^.AddressSpaceRoot, BufferAddress,
+       @Buffer[0], ByteCount) then
   begin
-    ReturnValue := MISTIX_ERR_FAULT;
+    Result := MISTIX_ERR_FAULT;
     Exit;
   end;
-  Source := PByte(PtrUInt(BufferAddress));
   for I := 0 to ByteCount - 1 do
-    SerialPutChar(Char(Source[I]));
-  ReturnValue := ByteCount;
+    SerialPutChar(Char(Buffer[I]));
+  Result := ByteCount;
 end;
 
-procedure SyscallDispatch(Frame: PInterruptFrame); cdecl;
-  public name 'mistix_syscall_dispatch';
+function SyscallDispatchFrame(Frame: PInterruptFrame): QWord;
 var
   Process: PKernelProcess;
   ReturnValue: QWord;
+  ChildPID: QWord;
+  Handle: LongWord;
 begin
+  Result := PtrUInt(Frame);
   ReturnValue := MISTIX_ERR_NOSYS;
   if (Frame = nil) or (CurrentProcessIndex >= PROCESS_MAX_COUNT) then
   begin
     if Frame <> nil then Frame^.SavedRAX := MISTIX_ERR_FAULT;
     Exit;
   end;
-  { The DPL-3 gate is the intended entry; reject kernel-originated calls. }
   if (Frame^.CS and 3) <> 3 then
   begin
     Frame^.SavedRAX := MISTIX_ERR_FAULT;
@@ -134,47 +95,94 @@ begin
 
   case Frame^.SavedRAX of
     MISTIX_SYSCALL_WRITE:
-      SyscallWriteUserBuffer(Process, Frame^.SavedRDI,
-        Frame^.SavedRSI, Frame^.SavedRDX, ReturnValue);
+      ReturnValue := SyscallWriteUserBuffer(Process, Frame^.SavedRDI,
+        Frame^.SavedRSI, Frame^.SavedRDX);
 
     MISTIX_SYSCALL_EXIT:
       begin
-        Process^.ExitCode := Frame^.SavedRDI;
-        Process^.State := psTerminated;
-        WriteText(#13#10'[PROCESS] user process pid=');
-        WriteDecimal(Process^.PID);
-        WriteText(' exited with code ');
-        WriteDecimal(Process^.ExitCode);
-        WriteText('.'#13#10);
-        WriteText('[NOTE] Phase 3 has one foreground process; exit halts the bootstrap kernel.'#13#10);
-        HaltForever;
+        ProcessTerminateCurrent(Frame, Frame^.SavedRDI);
+        Result := ProcessScheduleFromFrame(Frame);
+        Exit;
       end;
 
     MISTIX_SYSCALL_GETPID:
       ReturnValue := Process^.PID;
 
     MISTIX_SYSCALL_YIELD:
-      ReturnValue := 0; { Cooperative scheduling is deferred to Phase 4. }
+      begin
+        Frame^.SavedRAX := 0;
+        Result := ProcessScheduleFromFrame(Frame);
+        Exit;
+      end;
+
+    MISTIX_SYSCALL_FORK:
+      begin
+        if ProcessForkCurrent(Frame, ChildPID) then
+          ReturnValue := ChildPID
+        else
+          ReturnValue := MISTIX_ERR_NOMEM;
+      end;
+
+    MISTIX_SYSCALL_SPAWN:
+      begin
+        if ProcessSpawnFromUser(Frame^.SavedRDI, Frame^.SavedRSI, ChildPID) then
+          ReturnValue := ChildPID
+        else
+          ReturnValue := MISTIX_ERR_NOMEM;
+      end;
+
+    MISTIX_SYSCALL_WAITPID:
+      begin
+        Result := ProcessWaitCurrent(Frame, Frame^.SavedRDI,
+          Frame^.SavedRSI, ReturnValue);
+        if Result <> PtrUInt(Frame) then Exit;
+      end;
+
+    MISTIX_SYSCALL_ENDPOINT_CREATE:
+      ReturnValue := ProcessEndpointCreate(Process^, Handle);
+
+    MISTIX_SYSCALL_IPC_SEND:
+      ReturnValue := ProcessIPCSend(Process^, Frame^.SavedRDI,
+                                    Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_IPC_RECEIVE:
+      ReturnValue := ProcessIPCReceive(Process^, Frame^.SavedRDI,
+                                       Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_CAP_TRANSFER:
+      begin
+        if (Frame^.SavedRSI > High(LongWord)) or
+           (Frame^.SavedRDX > High(LongWord)) then
+          ReturnValue := MISTIX_ERR_INVAL
+        else
+          ReturnValue := ProcessCapabilityTransfer(CurrentProcessIndex,
+            Frame^.SavedRDI, LongWord(Frame^.SavedRSI), LongWord(Frame^.SavedRDX));
+      end;
+
+    MISTIX_SYSCALL_CAP_RECEIVE:
+      ReturnValue := ProcessCapabilityReceive(CurrentProcessIndex);
+
+    MISTIX_SYSCALL_CAP_CLOSE:
+      begin
+        if (Frame^.SavedRDI <= High(LongWord)) and
+           (ProcessCapabilityClose(Process^.Capabilities,
+             LongWord(Frame^.SavedRDI)) = krSuccess) then
+          ReturnValue := 0
+        else
+          ReturnValue := MISTIX_ERR_BADF;
+      end;
+
+    MISTIX_SYSCALL_KILL:
+      begin
+        ReturnValue := ProcessKill(CurrentProcessIndex,
+          Frame^.SavedRDI, Frame^.SavedRSI);
+        if (Frame^.SavedRDI = Process^.PID) and (ReturnValue = 0) then
+        begin
+          Result := ProcessScheduleFromFrame(Frame);
+          Exit;
+        end;
+      end;
   end;
 
   Frame^.SavedRAX := ReturnValue;
-end;
-
-{ Build a minimal ring-3 RFLAGS image: reserved bit 1 set; IF/IOPL/DF/TF clear. }
-procedure EnterUserMode(EntryPoint, UserStack: QWord);
-  assembler; nostackframe;
-asm
-  cli
-  mov ax, $3B
-  mov ds, ax
-  mov es, ax
-  xor eax, eax
-  mov fs, ax
-  mov gs, ax
-  push $3B
-  push rsi
-  push 2
-  push $43
-  push rdi
-  iretq
 end;

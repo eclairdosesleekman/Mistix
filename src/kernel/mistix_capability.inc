@@ -15,6 +15,7 @@ const
   CAP_RIGHT_MANAGE     = $00000080;
   CAP_RIGHT_USER_MAP   = $00000100;
   CAP_RIGHT_EXECUTE    = $00000200;
+  CAP_RIGHT_TRANSFER   = $00000400;
 
 type
   TObjectKind = (okNone, okEndpoint, okNotification, okMemoryObject);

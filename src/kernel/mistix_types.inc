@@ -99,9 +99,10 @@ const
   PTE_CACHE_DISABLE = $010;
   PTE_HUGE = $080;
   PTE_GLOBAL = $100;
+  PTE_COW = $200; { Software-managed copy-on-write marker. }
   PTE_NO_EXECUTE = $8000000000000000;
   PTE_ALLOWED_FLAGS = PTE_WRITABLE or PTE_USER or PTE_WRITE_THROUGH or
-                      PTE_CACHE_DISABLE or PTE_GLOBAL or PTE_NO_EXECUTE;
+                      PTE_CACHE_DISABLE or PTE_GLOBAL or PTE_COW or PTE_NO_EXECUTE;
 
   { Fixed-size early allocator: supports physical addresses below 64 GiB. }
   PMM_PAGE_COUNT = 16777216;

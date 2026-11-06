@@ -487,8 +487,8 @@ asm
   mov r12, rsp
   mov rdi, r12
   and rsp, -16
-  call mistix_exception_dispatch
-  mov rsp, r12
+  call mistix_trap_dispatch
+  mov rsp, rax
   pop r15
   pop r14
   pop r13

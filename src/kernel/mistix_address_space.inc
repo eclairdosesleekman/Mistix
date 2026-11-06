@@ -1,3 +1,6 @@
+function COWReleasePage(PhysicalAddress: QWord): Boolean; forward;
+function COWEnsureWritable(RootPhysical, VirtualAddress: QWord): Boolean; forward;
+
 { Mistix Phase 3: per-process x86-64 address spaces and ELF64 loading.
   The upper PML4 half is shared with the kernel; the lower half is private. }
 
@@ -333,7 +336,7 @@ begin
   begin
     EntryValue := PT^[I];
     if (EntryValue and PTE_PRESENT) = 0 then Continue;
-    if not PMMFreePage(EntryValue and PTE_ADDRESS_MASK) then Exit;
+    if not COWReleasePage(EntryValue and PTE_ADDRESS_MASK) then Exit;
     PT^[I] := 0;
   end;
   Result := PMMFreePage(PTPhysical);
@@ -439,12 +442,56 @@ begin
   begin
     if not AddressSpaceTranslate(RootPhysical, CurrentAddress,
                                  PhysicalAddress, Flags) then Exit;
+    if (Flags and PTE_USER) = 0 then Exit;
+    if (Flags and PTE_WRITABLE) = 0 then
+    begin
+      if not COWEnsureWritable(RootPhysical, CurrentAddress) then Exit;
+      if not AddressSpaceTranslate(RootPhysical, CurrentAddress,
+                                   PhysicalAddress, Flags) then Exit;
+      if (Flags and PTE_WRITABLE) = 0 then Exit;
+    end;
     Chunk := PAGE_SIZE - (CurrentAddress and (PAGE_SIZE - 1));
     if Chunk > Remaining then Chunk := Remaining;
     DestinationBytes := PByte(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
     for I := 0 to Chunk - 1 do
       DestinationBytes[I] := SourceBytes[I];
     Inc(SourceBytes, Chunk);
+    Inc(CurrentAddress, Chunk);
+    Dec(Remaining, Chunk);
+  end;
+  Result := True;
+end;
+
+function AddressSpaceCopyFrom(RootPhysical, SourceAddress: QWord;
+  Destination: Pointer; ByteCount: QWord): Boolean;
+var
+  SourceBytes: PByte;
+  DestinationBytes: PByte;
+  CurrentAddress: QWord;
+  Remaining: QWord;
+  PhysicalAddress: QWord;
+  Flags: QWord;
+  Chunk: QWord;
+  I: QWord;
+begin
+  Result := False;
+  if (ByteCount <> 0) and (Destination = nil) then Exit;
+  if not AddressSpaceValidateUserRange(RootPhysical, SourceAddress,
+                                       ByteCount) then Exit;
+  DestinationBytes := PByte(Destination);
+  CurrentAddress := SourceAddress;
+  Remaining := ByteCount;
+  while Remaining <> 0 do
+  begin
+    if not AddressSpaceTranslate(RootPhysical, CurrentAddress,
+                                 PhysicalAddress, Flags) then Exit;
+    if (Flags and PTE_USER) = 0 then Exit;
+    Chunk := PAGE_SIZE - (CurrentAddress and (PAGE_SIZE - 1));
+    if Chunk > Remaining then Chunk := Remaining;
+    SourceBytes := PByte(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
+    for I := 0 to Chunk - 1 do
+      DestinationBytes[I] := SourceBytes[I];
+    Inc(DestinationBytes, Chunk);
     Inc(CurrentAddress, Chunk);
     Dec(Remaining, Chunk);
   end;

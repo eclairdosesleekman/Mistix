@@ -5,7 +5,6 @@ var
   Paging: PLiminePagingModeResponse;
 begin
   Result := False;
-
   if LimineRequests.BaseRevision[2] <> 0 then
   begin
     WriteText('[FAIL] Limine base revision 6 was not accepted.'#13#10);
@@ -13,22 +12,11 @@ begin
   end;
   WriteText('[ OK ] Limine base revision 6 accepted.'#13#10);
 
-  if LimineRequests.StackSizeRequest.Response <> nil then
-    WriteText('[ OK ] 256 KiB boot stack request acknowledged.'#13#10)
-  else
-    WriteText('[WARN] Stack-size response missing; protocol default is in use.'#13#10);
-
   Paging := LimineRequests.PagingModeRequest.Response;
-  if Paging = nil then
+  if (Paging = nil) or
+     (Paging^.Mode <> LIMINE_PAGING_MODE_X86_64_4LVL) then
   begin
-    WriteText('[FAIL] Limine did not return the paging-mode response.'#13#10);
-    Exit;
-  end;
-  if Paging^.Mode <> LIMINE_PAGING_MODE_X86_64_4LVL then
-  begin
-    WriteText('[FAIL] Mistix requires 4-level paging; actual mode=');
-    WriteDecimal(Paging^.Mode);
-    WriteText(#13#10);
+    WriteText('[FAIL] Mistix requires Limine x86-64 four-level paging.'#13#10);
     Exit;
   end;
   WriteText('[ OK ] Limine selected x86-64 4-level paging.'#13#10);
@@ -44,12 +32,7 @@ begin
   WriteText(#13#10);
 
   Memmap := LimineRequests.MemmapRequest.Response;
-  if Memmap = nil then
-  begin
-    WriteText('[FAIL] Limine did not return a memory map.'#13#10);
-    Exit;
-  end;
-  if (Memmap^.EntryCount > LIMINE_MAX_MEMMAP_ENTRIES) or
+  if (Memmap = nil) or (Memmap^.EntryCount > LIMINE_MAX_MEMMAP_ENTRIES) or
      ((Memmap^.EntryCount <> 0) and (Memmap^.Entries = nil)) then
   begin
     WriteText('[FAIL] Limine memory-map structure failed validation.'#13#10);
@@ -58,7 +41,6 @@ begin
   WriteText('Memory map entries: ');
   WriteDecimal(Memmap^.EntryCount);
   WriteText(#13#10);
-
   Result := True;
 end;
 
@@ -76,10 +58,10 @@ var
   InitialPID: QWord;
 begin
   SerialInit;
-  WriteText(#13#10'=================================================='#13#10);
-  WriteText(' Mistix - Phase 3: user processes and syscall ABI  '#13#10);
-  WriteText(' Pascal freestanding microkernel / x86-64          '#13#10);
-  WriteText('=================================================='#13#10);
+  WriteText(#13#10'============================================================'#13#10);
+  WriteText(' Mistix - Phase 4: preemptive multi-process microkernel      '#13#10);
+  WriteText(' Pascal freestanding kernel / x86-64 / COW / user IPC       '#13#10);
+  WriteText('============================================================'#13#10);
 
   if not ValidateBootInformation then
   begin
@@ -101,9 +83,10 @@ begin
   IPCInitialize;
   NotificationInitialize;
   MemoryObjectInitialize;
+  COWInitialize;
   ProcessManagerInitialize;
 
-  WriteText(#13#10'[PHASE 3] Re-running kernel IPC and memory self-tests.'#13#10);
+  WriteText(#13#10'[PHASE 4] Kernel service self-tests.'#13#10);
   IPCTestOK := IPCRendezvousSelfTest;
   NotificationTestOK := NotificationSelfTest;
   MemoryObjectTestOK := MemoryObjectAliasSelfTest;
@@ -123,23 +106,25 @@ begin
     HaltForever;
   end;
   UserImageSize := QWord(PtrUInt(UserImageEnd) - PtrUInt(UserImageStart));
-  WriteText('[ OK ] Embedded Pascal user ELF image size=');
+  WriteText('[ OK ] Embedded Pascal init image size=');
   WriteDecimal(UserImageSize);
   WriteText(' bytes.'#13#10);
 
-  if not ProcessCreateFromELF(UserImageStart, UserImageSize, InitialPID) then
+  if not ProcessCreateFromELF(UserImageStart, UserImageSize, 0, InitialPID) then
   begin
     WriteText('[FAIL] Could not create initial user process.'#13#10);
     HaltForever;
   end;
 
   SyscallInitialize;
-  WriteText(#13#10'[PASS] Phase 3 kernel address spaces, ELF loader, per-process');
-  WriteText(#13#10'       capabilities and ring-3 syscall entry are initialised.'#13#10);
-  WriteText('[NOTE] Single foreground process; no timer preemption or SMP yet.'#13#10);
-  WriteText('[NOTE] User syscalls: write(1/2), exit, getpid, yield.'#13#10);
+  TimerInitialize;
+  WriteText(#13#10'[PASS] Phase 4 process scheduler, PIT preemption, fork/COW,'#13#10);
+  WriteText('       spawn/wait, per-process capabilities and user IPC ready.'#13#10);
+  WriteText('[NOTE] Single CPU; legacy 8259 PIC/PIT; no SMP or APIC yet.'#13#10);
+  WriteText('[NOTE] User syscalls: write, exit, getpid, yield, fork, spawn,'#13#10);
+  WriteText('       waitpid, endpoint_create, ipc_send/receive, cap_transfer.'#13#10);
 
-  ProcessRun(InitialPID);
+  ProcessLaunch(InitialPID);
   HaltForever;
 end;
 
