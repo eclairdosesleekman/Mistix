@@ -102,13 +102,13 @@ asm
   int $80
 end;
 
-function SysGetDents(FD, Buffer, MaxEntries: QWord): QWord; assembler; nostackframe;
+function SysGetDentsRaw(FD, Buffer, MaxEntries: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_GETDENTS
   int $80
 end;
 
-function SysChdir(Path: QWord): QWord; assembler; nostackframe;
+function SysChdirRaw(Path: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_CHDIR
   int $80
@@ -269,6 +269,32 @@ begin
   Retry := 0;
   repeat
     Result := SysCloseRaw(FD);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
+
+function SysGetDents(FD, Buffer, MaxEntries: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysGetDentsRaw(FD, Buffer, MaxEntries);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
+
+function SysChdir(Path: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysChdirRaw(Path);
     if Result <> MISTIX_EAGAIN then Exit;
     SysYield;
     Inc(Retry);
