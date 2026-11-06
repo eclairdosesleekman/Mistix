@@ -30,10 +30,14 @@ const
   VFS_RPC_BROKER_READ = $4D56534600000012;
   VFS_RPC_BROKER_WRITE = $4D56534600000013;
   VFS_RPC_BROKER_CLOSE = $4D56534600000014;
+  VFS10_DIR_OPEN = $4D56534600000021;
+  VFS10_DIR_READ = $4D56534600000022;
+  VFS10_CHDIR = $4D56534600000024;
   VFS_O_RDONLY = 0;
   VFS_O_WRONLY = 1;
   VFS_O_RDWR = 2;
   VFS_O_CREAT = $40;
+  VFS_O_DIRECTORY = $100;
   VFS_OPEN_MAX = 8;
   VFS_RPC_PATH_BYTES = 40;
   VFS_BROKER_PATH_BYTES = 128;
@@ -70,6 +74,7 @@ type
     DataSize: QWord;
     Position: QWord;
     Flags: LongWord;
+    Path: array[0..VFS_BROKER_PATH_BYTES - 1] of Char;
   end;
 
   TTempFile = record
@@ -367,13 +372,14 @@ var
   Path: array[0..VFS_BROKER_PATH_BYTES - 1] of Char;
   ValidPath: Boolean;
   DataOffset, DataSize, Requested, Available: QWord;
-  Slot, I: LongWord;
+  Slot, I, DirectoryEntryCount: LongWord;
   TempIndex: LongInt;
   Ext2InodeNumber: LongWord;
   Ext2Inode: TExt2UserInode;
   Ext2BytesRead: LongWord;
   Dest, Source: PByte;
   Flags: LongWord;
+  DirectoryPosition, EntryBytes: QWord;
 begin
   ClearMessage(Response);
   Response.MessageId := VFS_ERR_INVAL;
@@ -515,6 +521,128 @@ begin
         Response.Words[2] := Requested;
       end;
 
+    VFS10_DIR_OPEN:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not CopySharedBrokerPath(Path) then
+        begin
+          Response.MessageId := VFS_ERR_INVAL;
+          Exit;
+        end;
+        if (Request.Words[2] > High(LongWord)) or
+           ((LongWord(Request.Words[2]) and not LongWord(VFS_O_DIRECTORY)) <> 0) or
+           ((LongWord(Request.Words[2]) and 3) <> VFS_O_RDONLY) or
+           ((LongWord(Request.Words[2]) and VFS_O_DIRECTORY) = 0) then
+        begin
+          Response.MessageId := VFS_ERR_INVAL;
+          Exit;
+        end;
+        if not Ext2UPathIsMounted(Path) then
+        begin
+          Response.MessageId := VFS_ERR_NOENT;
+          Exit;
+        end;
+        if not Ext2Mounted then
+        begin
+          Response.MessageId := QWord(-19);
+          Exit;
+        end;
+        if not Ext2ULookupPath(Path, Ext2InodeNumber, Ext2Inode) then
+        begin
+          Response.MessageId := VFS_ERR_NOENT;
+          Exit;
+        end;
+        if (Ext2Inode.Mode and EXT2_U_MODE_MASK) <> EXT2_U_MODE_DIRECTORY then
+        begin
+          Response.MessageId := VFS_ERR_NOTDIR;
+          Exit;
+        end;
+        Response.Words[2] := AllocateOpen(0, 0, 3, -1, VFS_O_RDONLY);
+        if IsError(Response.Words[2]) then
+          Response.MessageId := Response.Words[2]
+        else
+        begin
+          Slot := LongWord(Response.Words[2]) and $FFFF;
+          Dec(Slot);
+          for I := 0 to VFS_BROKER_PATH_BYTES - 1 do
+            OpenSlots[Slot].Path[I] := Path[I];
+          Response.MessageId := 0;
+        end;
+      end;
+
+    VFS10_DIR_READ:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not LookupOpen(Request.Words[2], Slot) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        if OpenSlots[Slot].SourceKind <> 3 then
+        begin
+          Response.MessageId := VFS_ERR_NOTDIR;
+          Exit;
+        end;
+        if not Ext2UReadDirectory(OpenSlots[Slot].Path,
+             DirectoryEntryCount) then
+        begin
+          Response.MessageId := VFS_ERR_IO;
+          Exit;
+        end;
+        Requested := Request.Words[3];
+        if Requested > 16 then Requested := 16;
+        DirectoryPosition := OpenSlots[Slot].Position;
+        if DirectoryPosition > DirectoryEntryCount then
+        begin
+          Response.MessageId := VFS_ERR_PROTO;
+          Exit;
+        end;
+        Available := DirectoryEntryCount - DirectoryPosition;
+        if Requested > Available then Requested := Available;
+        if Requested <> 0 then
+        begin
+          EntryBytes := Requested * SizeOf(TMistixDirent);
+          for I := 0 to LongWord(EntryBytes) - 1 do
+            SharedBuffer[I] := SharedBuffer[
+              DirectoryPosition * SizeOf(TMistixDirent) + I];
+        end;
+        Inc(OpenSlots[Slot].Position, Requested);
+        Response.MessageId := 0;
+        Response.Words[2] := Requested;
+      end;
+
+    VFS10_CHDIR:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not CopySharedBrokerPath(Path) then
+        begin
+          Response.MessageId := VFS_ERR_INVAL;
+          Exit;
+        end;
+        if not Ext2UPathIsMounted(Path) then
+        begin
+          Response.MessageId := VFS_ERR_NOENT;
+          Exit;
+        end;
+        if not Ext2Mounted then
+        begin
+          Response.MessageId := QWord(-19);
+          Exit;
+        end;
+        if not Ext2ULookupPath(Path, Ext2InodeNumber, Ext2Inode) then
+        begin
+          Response.MessageId := VFS_ERR_NOENT;
+          Exit;
+        end;
+        if (Ext2Inode.Mode and EXT2_U_MODE_MASK) <> EXT2_U_MODE_DIRECTORY then
+        begin
+          Response.MessageId := VFS_ERR_NOTDIR;
+          Exit;
+        end;
+        Response.MessageId := 0;
+        Response.Words[2] := 0;
+      end;
+
     VFS_RPC_BROKER_WRITE:
       begin
         if Request.WordCount < 4 then Exit;
@@ -574,6 +702,8 @@ begin
         OpenSlots[Slot].Position := 0;
         OpenSlots[Slot].TempIndex := -1;
         OpenSlots[Slot].Flags := 0;
+        for I := 0 to VFS_BROKER_PATH_BYTES - 1 do
+          OpenSlots[Slot].Path[I] := #0;
         Response.MessageId := 0;
       end;
   else
@@ -596,8 +726,10 @@ var
   Ext2BytesRead: LongWord;
   DirectoryEntryCount: LongWord;
 begin
-  if (Request.MessageId >= VFS_RPC_BROKER_OPEN) and
-     (Request.MessageId <= VFS_RPC_BROKER_CLOSE) then
+  if ((Request.MessageId >= VFS_RPC_BROKER_OPEN) and
+      (Request.MessageId <= VFS_RPC_BROKER_CLOSE)) or
+     ((Request.MessageId >= VFS10_DIR_OPEN) and
+      (Request.MessageId <= VFS10_CHDIR)) then
   begin
     DispatchBrokerRequest(Request, Response);
     Exit;
