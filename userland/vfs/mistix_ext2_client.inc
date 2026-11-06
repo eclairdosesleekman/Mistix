@@ -399,6 +399,7 @@ var
   EntryInode: LongWord;
   EntryType: Byte;
   Source: PByte;
+  SkipEntry: Boolean;
 begin
   Result := False;
   EntryCount := 0;
@@ -437,7 +438,21 @@ begin
       if NameLength > RecordLength - 8 then Exit;
       { TMistixDirent reserves 64 bytes including a terminating NUL. }
       if NameLength > 63 then Exit;
-      if (EntryInode <> 0) and (NameLength <> 0) then
+      SkipEntry := False;
+      if (NameLength = 1) and
+         (Ext2BlockScratch[EntryOffset + 8] = Ord('.')) then
+        SkipEntry := True;
+      if (NameLength = 2) and
+         (Ext2BlockScratch[EntryOffset + 8] = Ord('.')) and
+         (Ext2BlockScratch[EntryOffset + 9] = Ord('.')) then
+        SkipEntry := True;
+      if NameLength <> 0 then
+        for I := 0 to NameLength - 1 do
+          if (Ext2BlockScratch[EntryOffset + 8 + I] = 0) or
+             (Ext2BlockScratch[EntryOffset + 8 + I] = Ord('/')) or
+             (Ext2BlockScratch[EntryOffset + 8 + I] < 32) or
+             (Ext2BlockScratch[EntryOffset + 8 + I] = 127) then Exit;
+      if (EntryInode <> 0) and (NameLength <> 0) and not SkipEntry then
       begin
         if EntryCount >= 128 then Exit;
         Ext2DirEntries[EntryCount].Inode := EntryInode;

@@ -52,17 +52,17 @@ in-flight requests at 32.
 
 ## Integration plan
 
-This commit adds the ABI and executable source-contract checks. It does not
-claim that the Phase 9 kernel dispatch or vfsd has already been migrated.
-The next integration change must add directory remote-description state,
-route syscall 20 (getdents), 21 (chdir) and 22 (getcwd) through the broker,
-extend the broker to a bounded transaction table, implement matching vfsd
-handlers for MFS1/tmpfs/Ext2, and add runtime tests for cancellation, stale
-server generations, directory EOF and invalid entries.
+Phase 10 adds the ABI and executable source-contract checks. Phase 11
+routes Ext2 /mnt/disk directory open/read and chdir through the existing
+single-slot broker. getcwd remains backed by the kernel's confirmed cwd cache;
+MFS1 and tmpfs directory proxying, a multi-slot transaction table,
+cancellation, timeouts and runtime tests remain future integration work.
 
 ## Current limitations
 
-- Existing syscall 20–22 continue using the Phase 9 kernel VFS path.
-- The transaction ABI is defined, but Phase 9 still has a single-slot broker.
+- Syscall 20 (getdents) and 21 (chdir) use the broker only for Ext2
+  paths under /mnt/disk; syscall 22 (getcwd) reads the kernel cwd cache.
+- The broker still has one outstanding transaction slot.
 - No timeout worker or cancellation acknowledgement is wired into the kernel.
-- No Ext2 writes, UID/GID permission enforcement or SMP locking are added.
+- MFS1/tmpfs directory proxying, Ext2 writes, UID/GID permission enforcement
+  and SMP locking are not included in Phase 11.
