@@ -47,10 +47,17 @@ const
   VFS_BROKER_READ = $4D56534600000012;
   VFS_BROKER_WRITE = $4D56534600000013;
   VFS_BROKER_CLOSE = $4D56534600000014;
+  VFS_BROKER_DIR_OPEN = $4D56534600000021;
+  VFS_BROKER_DIR_READ = $4D56534600000022;
+  VFS_BROKER_CHDIR = $4D56534600000024;
   VFS_BROKER_OP_OPEN = 1;
   VFS_BROKER_OP_READ = 2;
   VFS_BROKER_OP_WRITE = 3;
   VFS_BROKER_OP_CLOSE = 4;
+  VFS_BROKER_OP_DIR_OPEN = 5;
+  VFS_BROKER_OP_DIR_READ = 6;
+  VFS_BROKER_OP_CHDIR = 7;
+  VFS_BROKER_DIRENT_MAX = 16;
   VFS_BROKER_CLOSE_QUEUE_MAX = 128;
 
 type
@@ -448,7 +455,8 @@ begin
         (ProcessTable[I].State = psFree)) and
        (VFSBrokerPending.Ready <> 0) then
     begin
-      if (VFSBrokerPending.Operation = VFS_BROKER_OP_OPEN) and
+      if ((VFSBrokerPending.Operation = VFS_BROKER_OP_OPEN) or
+          (VFSBrokerPending.Operation = VFS_BROKER_OP_DIR_OPEN)) and
          (VFSBrokerPending.ResultValue = 0) and
          (VFSBrokerPending.Payload <> 0) then
         VFSQueueRemoteClose(VFSBrokerPending.Payload);
@@ -463,17 +471,33 @@ function VFSBrokerCall(ProcessIndex, Operation: LongWord;
   const Path: array of Char): QWord;
 var
   Message: TIPCMessage;
-  I, PathLength: LongWord;
+  I, J, PathLength: LongWord;
   ServerRoot: QWord;
   Payload: QWord;
   Status: QWord;
   FD: LongInt;
+  TransferBytes: QWord;
+  Dirent: TVFSDirent;
+  NameTerminated, ValidEntries, PathOperation: Boolean;
   LocalPath: array[0..VFS_PATH_MAX] of Byte;
 begin
   Result := QWord(-19); { -ENODEV }
+  PathOperation := (Operation = VFS_BROKER_OP_OPEN) or
+    (Operation = VFS_BROKER_OP_DIR_OPEN) or
+    (Operation = VFS_BROKER_OP_CHDIR);
   if ((Operation = VFS_BROKER_OP_READ) or
       (Operation = VFS_BROKER_OP_WRITE)) and (ByteCount > VFS_IO_MAX) then
     ByteCount := VFS_IO_MAX;
+  if Operation = VFS_BROKER_OP_DIR_READ then
+  begin
+    if ByteCount > VFS_BROKER_DIRENT_MAX then
+      ByteCount := VFS_BROKER_DIRENT_MAX;
+    if ByteCount = 0 then
+    begin
+      Result := 0;
+      Exit;
+    end;
+  end;
   VFSBrokerPumpReplies;
   Result := QWord(-11); { -EAGAIN: a different process owns the serial RPC slot. }
   if VFSBrokerPending.Active <> 0 then
@@ -489,7 +513,7 @@ begin
       Result := QWord(-16); { -EBUSY: caller changed request while pending. }
       Exit;
     end;
-    if Operation = VFS_BROKER_OP_OPEN then
+    if PathOperation then
       for I := 0 to VFS_PATH_MAX do
         if VFSBrokerPending.RequestPath[I] <> Path[I] then
         begin
@@ -517,6 +541,88 @@ begin
           end
           else
             Result := QWord(FD);
+        end;
+      VFS_BROKER_OP_DIR_OPEN:
+        begin
+          FD := VFSAllocateRemoteDirectoryFD(ProcessTable[ProcessIndex].Files,
+            Payload, LongWord(VFSBrokerPending.Flags));
+          if FD < 0 then
+          begin
+            VFSQueueRemoteClose(Payload);
+            Result := QWord(-24);
+          end
+          else
+            Result := QWord(FD);
+        end;
+      VFS_BROKER_OP_DIR_READ:
+        begin
+          Result := QWord(-71); { -EPROTO }
+          if (Payload <= VFSBrokerPending.ByteCount) and
+             (Payload <= VFS_BROKER_DIRENT_MAX) then
+          begin
+            Result := Payload;
+            if Payload <> 0 then
+            begin
+              TransferBytes := Payload * SizeOf(TVFSDirent);
+              if TransferBytes > VFS_IO_MAX then
+                Result := QWord(-71)
+              else
+              begin
+                ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
+                if not AddressSpaceCopyFrom(ServerRoot, VFS_BROKER_SHARED_BASE,
+                     @VFSBrokerScratch[0], TransferBytes) then
+                  Result := QWord(-14)
+                else
+                begin
+                  ValidEntries := True;
+                  for I := 0 to LongWord(Payload) - 1 do
+                  begin
+                    Dirent := PVFSDirent(PtrUInt(@VFSBrokerScratch[0]) +
+                      QWord(I) * SizeOf(TVFSDirent))^;
+                    if (Dirent.Inode = 0) or
+                       ((Dirent.EntryType <> VFS_DIRENT_FILE) and
+                        (Dirent.EntryType <> VFS_DIRENT_DIRECTORY) and
+                        (Dirent.EntryType <> 0)) then
+                      ValidEntries := False;
+                    NameTerminated := False;
+                    for J := 0 to VFS_DIRENT_NAME_MAX - 1 do
+                    begin
+                      if Dirent.Name[J] = #0 then
+                      begin
+                        if J = 0 then ValidEntries := False;
+                        if (J = 1) and (Dirent.Name[0] = '.') then
+                          ValidEntries := False;
+                        if (J = 2) and (Dirent.Name[0] = '.') and
+                           (Dirent.Name[1] = '.') then
+                          ValidEntries := False;
+                        NameTerminated := True;
+                        Break;
+                      end;
+                      if (Dirent.Name[J] = '/') or
+                         (Dirent.Name[J] < ' ') or
+                         (Dirent.Name[J] = #127) then
+                        ValidEntries := False;
+                    end;
+                    if not NameTerminated then ValidEntries := False;
+                  end;
+                  if not ValidEntries then
+                    Result := QWord(-71)
+                  else if not AddressSpaceCopyTo(
+                    ProcessTable[ProcessIndex].AddressSpaceRoot,
+                    VFSBrokerPending.UserBuffer, @VFSBrokerScratch[0],
+                    TransferBytes) then
+                    Result := QWord(-14);
+                end;
+              end;
+            end;
+          end;
+        end;
+      VFS_BROKER_OP_CHDIR:
+        begin
+          for I := 0 to VFS_PATH_MAX do
+            ProcessTable[ProcessIndex].Files.CurrentDirectory[I] :=
+              VFSBrokerPending.RequestPath[I];
+          Result := 0;
         end;
       VFS_BROKER_OP_READ:
         begin
@@ -572,7 +678,16 @@ begin
       end;
     end;
   end
-  else if Operation = VFS_BROKER_OP_OPEN then
+  else if Operation = VFS_BROKER_OP_DIR_READ then
+  begin
+    Result := QWord(-14);
+    TransferBytes := ByteCount * SizeOf(TVFSDirent);
+    if (TransferBytes = 0) or (TransferBytes > VFS_IO_MAX) or
+       not AddressSpaceValidateUserRange(
+         ProcessTable[ProcessIndex].AddressSpaceRoot, UserBuffer,
+         TransferBytes) then Exit;
+  end
+  else if PathOperation then
   begin
     PathLength := VFSStringLength(Path);
     Result := QWord(-36); { -ENAMETOOLONG }
@@ -594,6 +709,9 @@ begin
     VFS_BROKER_OP_READ: Message.MessageId := VFS_BROKER_READ;
     VFS_BROKER_OP_WRITE: Message.MessageId := VFS_BROKER_WRITE;
     VFS_BROKER_OP_CLOSE: Message.MessageId := VFS_BROKER_CLOSE;
+    VFS_BROKER_OP_DIR_OPEN: Message.MessageId := VFS_BROKER_DIR_OPEN;
+    VFS_BROKER_OP_DIR_READ: Message.MessageId := VFS_BROKER_DIR_READ;
+    VFS_BROKER_OP_CHDIR: Message.MessageId := VFS_BROKER_CHDIR;
   else
     begin
       Result := QWord(-22);
@@ -603,7 +721,9 @@ begin
   if VFSBrokerNextTransaction = 0 then VFSBrokerNextTransaction := 1;
   Message.Words[0] := VFSBrokerNextTransaction;
   Message.Words[1] := ProcessTable[ProcessIndex].PID;
-  if Operation = VFS_BROKER_OP_OPEN then
+  if (Operation = VFS_BROKER_OP_OPEN) or
+     (Operation = VFS_BROKER_OP_DIR_OPEN) or
+     (Operation = VFS_BROKER_OP_CHDIR) then
   begin
     Message.Words[2] := Flags;
     Message.Words[3] := 0;
@@ -633,11 +753,23 @@ begin
   VFSBrokerPending.ResultValue := QWord(-11);
   VFSBrokerPending.Payload := 0;
   for I := 0 to VFS_PATH_MAX do
-    if (Operation = VFS_BROKER_OP_OPEN) and (I <= LongWord(High(Path))) then
+    if PathOperation and (I <= LongWord(High(Path))) then
       VFSBrokerPending.RequestPath[I] := Path[I]
     else
       VFSBrokerPending.RequestPath[I] := #0;
   Result := QWord(-11);
+end;
+
+function VFSBrokerIsExt2Path(const Path: array of Char): Boolean;
+begin
+  Result := False;
+  if Length(Path) < 10 then Exit;
+  if (Path[0] <> '/') or (Path[1] <> 'm') or
+     (Path[2] <> 'n') or (Path[3] <> 't') or
+     (Path[4] <> '/') or (Path[5] <> 'd') or
+     (Path[6] <> 'i') or (Path[7] <> 's') or
+     (Path[8] <> 'k') then Exit;
+  Result := (Path[9] = #0) or (Path[9] = '/');
 end;
 
 function SyscallOpenUser(Process: PKernelProcess; PathAddress,
@@ -649,6 +781,27 @@ var
 begin
   if (Flags and VFS_O_DIRECTORY) <> 0 then
   begin
+    if VFSBrokerRegistered then
+    begin
+      if not VFSCopyUserString(Process^.AddressSpaceRoot, PathAddress,
+           UserPath) then
+      begin
+        Result := QWord(-14);
+        Exit;
+      end;
+      if not VFSNormalizePath(Process^.Files.CurrentDirectory, UserPath,
+           CanonicalPath) then
+      begin
+        Result := QWord(-36);
+        Exit;
+      end;
+      if VFSBrokerIsExt2Path(CanonicalPath) then
+      begin
+        Result := VFSBrokerCall(CurrentProcessIndex,
+          VFS_BROKER_OP_DIR_OPEN, 0, 0, 0, Flags, CanonicalPath);
+        Exit;
+      end;
+    end;
     Result := VFSOpenUser(Process^.Files, Process^.AddressSpaceRoot,
       PathAddress, Flags);
     Exit;
@@ -737,6 +890,54 @@ begin
   end;
   Result := VFSWriteUser(Process^.Files, Process^.AddressSpaceRoot,
     FileDescriptor, BufferAddress, ByteCount);
+end;
+
+function SyscallGetDentsUser(Process: PKernelProcess; FileDescriptor,
+  BufferAddress, MaximumEntries: QWord): QWord;
+var
+  RemoteHandle: QWord;
+  EmptyPath: array[0..0] of Char;
+begin
+  if VFSIsRemoteDirectoryFD(Process^.Files, FileDescriptor, RemoteHandle) then
+  begin
+    EmptyPath[0] := #0;
+    Result := VFSBrokerCall(CurrentProcessIndex, VFS_BROKER_OP_DIR_READ,
+      RemoteHandle, BufferAddress, MaximumEntries, 0, EmptyPath);
+    Exit;
+  end;
+  Result := VFSGetDentsUser(Process^.Files, Process^.AddressSpaceRoot,
+    FileDescriptor, BufferAddress, MaximumEntries);
+end;
+
+function SyscallChdirUser(Process: PKernelProcess; PathAddress: QWord): QWord;
+var
+  UserPath, CanonicalPath: array[0..VFS_PATH_MAX] of Char;
+begin
+  if not VFSBrokerRegistered then
+  begin
+    Result := VFSChdirUser(Process^.Files, Process^.AddressSpaceRoot,
+      PathAddress);
+    Exit;
+  end;
+  if not VFSCopyUserString(Process^.AddressSpaceRoot, PathAddress, UserPath) then
+  begin
+    Result := QWord(-14);
+    Exit;
+  end;
+  if not VFSNormalizePath(Process^.Files.CurrentDirectory, UserPath,
+       CanonicalPath) then
+  begin
+    Result := QWord(-36);
+    Exit;
+  end;
+  if VFSBrokerIsExt2Path(CanonicalPath) then
+  begin
+    Result := VFSBrokerCall(CurrentProcessIndex, VFS_BROKER_OP_CHDIR,
+      0, 0, 0, 0, CanonicalPath);
+    Exit;
+  end;
+  Result := VFSChdirUser(Process^.Files, Process^.AddressSpaceRoot,
+    PathAddress);
 end;
 
 function SyscallCloseUser(Process: PKernelProcess; FileDescriptor: QWord): QWord;
@@ -886,12 +1087,11 @@ begin
         Frame^.SavedRDI);
 
     MISTIX_SYSCALL_GETDENTS:
-      ReturnValue := VFSGetDentsUser(Process^.Files, Process^.AddressSpaceRoot,
-        Frame^.SavedRDI, Frame^.SavedRSI, Frame^.SavedRDX);
+      ReturnValue := SyscallGetDentsUser(Process, Frame^.SavedRDI,
+        Frame^.SavedRSI, Frame^.SavedRDX);
 
     MISTIX_SYSCALL_CHDIR:
-      ReturnValue := VFSChdirUser(Process^.Files, Process^.AddressSpaceRoot,
-        Frame^.SavedRDI);
+      ReturnValue := SyscallChdirUser(Process, Frame^.SavedRDI);
 
     MISTIX_SYSCALL_GETCWD:
       ReturnValue := VFSGetCWDUser(Process^.Files, Process^.AddressSpaceRoot,
