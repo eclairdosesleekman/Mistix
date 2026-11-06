@@ -1,119 +1,74 @@
-# Mistix Phase 5 — UNIX 基盤
+# Mistix Phase 6 — Storage services and filesystem groundwork
 
-Mistix Phase 5 は Phase 4 の x86-64 Pascal カーネルを引き継ぎ、UNIX ライクなファイル操作と最小ユーザーランドを追加する開発段階です。
+Mistix Phase 6 は Phase 5 の Pascal カーネル／UNIX ユーザーランドを引き継ぎ、ストレージとサービス分離の次の段階を追加する開発スナップショットです。
 
-## 実装範囲
+## Phase 6 の実装範囲
 
-- Pascal 製 VFS ブートストラップ
-- 読み取り専用 MFS1 InitFS
-- DevFS 相当の `/dev/console`、`/dev/null`、`/dev/serial`
-- プロセスごとのファイルディスクリプタ表
-- `fork()`／`spawn_path()` 後の open-file description 共有
-- `open`、`read`、`write`、`close`、`dup2`
-- `pipe`、`getdents`、`chdir`、`getcwd`
-- Pascal 製 `init`、`sh`、`ls`、`cat`、`echo`
-- 1 段のパイプライン（例: `cat /etc/motd | cat`）
+### 実際に接続したユーザーランドサービス
 
-## アーキテクチャー
+- `vfsd`: 独立した Ring 3 プロセスとして起動する Pascal 製 VFS RPC サーバー
+- `blockd`: 独立した Ring 3 プロセスとして起動する Pascal 製 RAM ブロックサーバー
+- Capability Transfer によるサーバー Endpoint の受け渡し
+- リクエスト Endpoint と返信 Endpoint の分離
+- `vfsd` の MFS1 アーカイブ検証、`OPEN`、`READ`、`CLOSE`、`PING`
+- `blockd` の `INFO`、`READ`、`WRITE`（64 KiB の揮発性 RAM disk）
+- `init` から両サービスを spawn し、IPC RPC のラウンドトリップを検査
 
-```text
-Pascal applications
-  init / sh / ls / cat / echo
-          |
-          | int 0x80 syscall ABI
-          v
-Process manager + VFS bootstrap core
-  per-process FD table / open-file descriptions / pipes
-          |
-          +---- InitFS (read-only MFS1 archive)
-          |
-          +---- DevFS-like device nodes
-          |
-          v
-Mistix microkernel
-  address spaces / scheduler / IPC / capabilities / COW
-```
+`vfsd` はビルド時に `/bin` と `/etc/motd` を含む MFS1 イメージを自身の ELF に埋め込みます。起動後、サービスはそのイメージをユーザーモードで読み取り、IPC 要求に応答します。IPC メッセージのペイロードは 6 個の `QWord` なので、パスは最大 39 文字、1 回の READ は最大 40 byte に制限しています。
 
-### マイクロカーネル境界について
+### カーネル内ストレージ基盤
 
-この段階では、VFS の要求処理を既存のシステムコール入口に接続するため、VFS コアをカーネル内の Pascal モジュールとして実装しています。これは起動可能な UNIX 基盤を先に作るための移行用構成であり、最終的なマイクロカーネル境界ではありません。
+- ATA PIO primary-master の IDENTIFY
+- LBA28 のポーリング READ SECTORS / WRITE SECTORS
+- MBR primary partition の検出
+- 読み取り専用 Ext2 の superblock / group descriptor / inode / directory lookup
+- Ext2 direct block による小さな通常ファイルの読み込み
+- mount namespace の最小テーブル
+- IPv4 header checksum と Ethernet / ARP / IPv4 / UDP frame parser
+- 合成 Ethernet/IPv4/UDP パケットを使ったパーサー自己テスト
 
-VFS のノード管理、open-file description、ファイル操作 API を独立したユニットとして隔離しています。後続段階では、これらの操作を IPC と Capability 経由でユーザーランド VFS サーバーへ移します。
+## 重要なアーキテクチャー上の境界
 
-## ファイルシステム
+この Phase 6 は、VFS の完全なユーザーランド移行を完了したものではありません。
 
-### InitFS
+- `vfsd` は独立した IPC サーバーとして実際に起動し、MFS1 のファイルを応答できます。
+- しかし、既存の `open/read/write/getdents` syscall は互換性維持のため、まだ Phase 5 のカーネル内 VFS を呼び出します。
+- `blockd` はサービス境界の IPC 試験用 RAM disk であり、物理 ATA デバイスをユーザーランドへ公開するドライバではありません。
+- ATA PIO ドライバと Ext2 読み取りコードはカーネル内にあります。VFS サーバーからブロックサーバーへ Ext2 I/O を IPC で委譲する接続は未完了です。
+- mount table は Ext2 mount metadata を保持しますが、Phase 5 VFS の pathname resolver とはまだ統合していません。
+- ネットワーク部はパケット解析コアのみです。NIC ドライバ、ARP cache、routing、TCP/UDP socket API、ユーザーランド network server は未実装です。
 
-MFS1 という読み取り専用アーカイブをビルド時に生成し、カーネル ELF に埋め込みます。現在の初期イメージには次のファイルを含めます。
+この構成を明確に分けたのは、動作していないマイクロカーネル移行を「完了」と誤認しないためです。次段階では、共有メモリを使う RPC、カーネル VFS syscall のサービス転送、ブロックサービスへの Ext2 I/O 委譲を行います。
 
-- `/bin/sh`
-- `/bin/ls`
-- `/bin/cat`
-- `/bin/echo`
-- `/etc/motd`
-
-MFS1 のヘッダーは `MFS1` magic、バージョン、エントリー数です。各エントリーはパス長、予約フィールド、データ長、ASCII パス、ファイルデータで構成されます。マウント時に範囲とパス形式を検査します。
-
-### DevFS 相当
-
-初期デバイスノードは次のとおりです。
-
-- `/dev/console`: COM1 を使う標準コンソール
-- `/dev/serial`: COM1 の生入出力
-- `/dev/null`: 書き込みを捨て、読み込み時に EOF を返す
-
-TTY は現段階では raw serial です。カーネルの標準入力は非ブロッキングで `-EAGAIN` を返し、シェルが文字単位で読み取り・エコー・簡易編集を行います。
-
-## ファイルディスクリプタと Pipe
-
-FD はプロセスごとの `TVFSProcessFiles` に保持します。複製された FD は共有 open-file description を参照するため、ファイル位置や Pipe endpoint の寿命が `dup2`／`fork`／`spawn_path` をまたいで整合します。
-
-Pipe は固定長 4096 byte の FIFO です。読み込み側はデータがなく writer が残っている場合 `-EAGAIN`、writer がすべて閉じられた場合 EOF (`0`) を返します。書き込み側は reader がいなければ `-EPIPE`、バッファが満杯なら `-EAGAIN` を返します。ユーザーランドの `SysWriteAll` は部分書き込みと `-EAGAIN` を再試行します。
-
-## システムコール ABI
-
-既存の Phase 0〜4 の番号は維持し、以下を追加しています。x86-64 の `int 0x80` を使い、戻り値は `RAX` です。
-
-| 番号 | 名前 | 引数 |
-|---:|---|---|
-| 15 | `open` | `RDI=path`, `RSI=flags` |
-| 16 | `read` | `RDI=fd`, `RSI=buffer`, `RDX=count` |
-| 17 | `close` | `RDI=fd` |
-| 18 | `dup2` | `RDI=oldfd`, `RSI=newfd` |
-| 19 | `pipe` | `RDI=QWord[2]` のユーザーポインタ |
-| 20 | `getdents` | `RDI=fd`, `RSI=entries`, `RDX=max_entries` |
-| 21 | `chdir` | `RDI=path` |
-| 22 | `getcwd` | `RDI=buffer`, `RSI=capacity` |
-| 23 | `spawn_path` | `RDI=path`, `RSI=args`, `RDX=stdin_fd`, `RCX=stdout_fd` |
-| 24 | `getcmdline` | `RDI=buffer`, `RSI=capacity` |
-
-既存の syscall 1 `write` は FD 経由の実装に接続しています。
-
-## ユーザーランド
-
-`init` は `/etc/motd` を表示し、`/bin/sh` を起動して終了後に再起動します。`sh` は次の組み込みコマンドを持ちます。
+## Phase 6 のファイル
 
 ```text
-help
-pwd
-cd /etc
-exit
+mistix-phase6/
+├── boot/limine.conf
+├── linker.ld
+├── Makefile
+├── src/kernel/
+│   ├── mistixkernel.pas
+│   ├── mistix_block.inc
+│   ├── mistix_ext2.inc
+│   ├── mistix_mount.inc
+│   ├── mistix_net.inc
+│   └── ... Phase 0–5 のカーネル基盤
+├── userland/
+│   ├── common/mistixlib.inc
+│   ├── init/mistixinit.pas
+│   ├── vfs/mistixvfsd.pas
+│   ├── block/mistixblockd.pas
+│   ├── sh/mistixsh.pas
+│   └── bin/{mistixls,mistixcat,mistixecho}.pas
+├── tools/
+│   ├── mkinitfs.py
+│   └── check_source.py
+└── docs/
+    └── PHASE6-DESIGN.md
 ```
 
-外部コマンド:
-
-```text
-ls /
-cat /etc/motd
-echo Hello, Mistix!
-cat /etc/motd | cat
-```
-
-シェルは単純な空白区切りと 1 段の `|` のみに対応します。クォート、環境変数展開、リダイレクト、複数段パイプ、ジョブ制御は未実装です。
-
-## ビルド
-
-必要なツール:
+## ビルド要件
 
 - x86-64 Linux 開発ホスト
 - Free Pascal Compiler (FPC)
@@ -134,23 +89,26 @@ make iso LIMINE_DIR=../limine
 make run LIMINE_DIR=../limine
 ```
 
-## 制約と未実装項目
+物理 ATA PIO デバイスを試す場合は、ディスクイメージを指定します。
 
-- この環境では FPC と QEMU が利用できなかったため、実コンパイルと起動テストは未実施です。構造チェックと Makefile のドライランを行う段階です。
-- VFS はまだカーネル内のブートストラップコアであり、独立したユーザーランド VFS サーバーではありません。
-- InitFS は read-only。書き込み可能な FS、mount/unmount、symlink、permission、rename、unlink は未実装です。
-- Pipe は固定長かつ非ブロッキングで、カーネルスレッドをブロックする完全な POSIX pipe ではありません。
-- TTY は raw COM1 のみ。canonical line discipline、PTY、job control、foreground process group は未実装です。
-- `spawn_path` は簡易 command-line 文字列 ABI で、完全な `argv`／`envp` ABI ではありません。
-- POSIX 完全準拠、動的リンク、SMP、複数 CPU は未対応です。
-- カーネルとユーザーランドは Pascal。CPU entry、割り込み、syscall、コンテキストスイッチの低レベル境界には Pascal ソース内の inline assembler を使用します。
+```sh
+make run LIMINE_DIR=../limine DISK_IMAGE=../mistix-disk.img
+```
 
-## ディレクトリ
+ディスクイメージを指定した `run` は、primary IDE PIO を提供する QEMU `pc` machine type で起動します。Q35 上で AHCI disk を使う場合は AHCI driver が必要であり、この Phase 6 の ATA PIO driver では検出できません。
 
-- `src/kernel/`: Pascal カーネル
-- `userland/init/`: 初期プロセス
-- `userland/sh/`: シェル
-- `userland/bin/`: 基本コマンド
-- `userland/common/`: Pascal syscall ラッパー
-- `tools/`: ホスト側 InitFS ビルダーとソース構造チェッカー
-- `docs/`: 設計資料
+## 検証状況
+
+この生成環境には FPC と QEMU がないため、FPC 実コンパイルおよび QEMU 起動試験は未実施です。`make check-source` はソース構成・ABI 名・依存順序を調べる静的チェッカーであり、Pascal の型検査や実行時安全性を保証しません。GNU ld を使う ELF 埋め込み・Limine ISO の最終リンクも、開発ホストで再検証してください。
+
+## 制約
+
+- ATA: primary master、PIO polling、LBA28 のみ。AHCI/NVMe、DMA、IRQ、secondary channel、slave、LBA48 は未対応。
+- MBR: primary partition 4 個まで。GPT/拡張パーティションは未対応。
+- Ext2: read-only。indirect block、HTree directory index、Extents、journal replay、symlink は未対応。direct block のみなので 12 * block size を超えるファイルは読めません。
+- `blockd`: 64 KiB volatile RAM disk。電源断・再起動で内容は消えます。ATA driver とは未接続。
+- `vfsd`: read-only MFS1 service。長い path、write/create/unlink/rename、directory enumeration、mount RPC は未対応。
+- VFS syscalls は現時点でカーネル内互換実装を利用します。
+- Network: parser/self-test のみ。ハードウェア NIC や送受信 path はありません。
+- single CPU 前提。SMP、完全な POSIX、動的リンク、TCP socket API は未対応。
+- カーネルとユーザーランドは Pascal。CPU 命令境界には Pascal ソース内の inline assembler を使用します。

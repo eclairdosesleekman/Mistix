@@ -21,8 +21,23 @@ const
   MISTIX_SYSCALL_GETCWD = 22;
   MISTIX_SYSCALL_SPAWN_PATH = 23;
   MISTIX_SYSCALL_GETCMDLINE = 24;
+  MISTIX_SYSCALL_ENDPOINT_CREATE = 8;
+  MISTIX_SYSCALL_IPC_SEND = 9;
+  MISTIX_SYSCALL_IPC_RECEIVE = 10;
+  MISTIX_SYSCALL_CAP_TRANSFER = 11;
+  MISTIX_SYSCALL_CAP_RECEIVE = 12;
+  MISTIX_SYSCALL_CAP_CLOSE = 13;
+  MISTIX_CAP_SEND = $00000001;
+  MISTIX_CAP_RECEIVE = $00000002;
 
 type
+  TMistixIPCMessage = packed record
+    MessageId: QWord;
+    WordCount: Byte;
+    Reserved: array[0..6] of Byte;
+    Words: array[0..5] of QWord;
+  end;
+
   TMistixDirent = packed record
     Inode: QWord;
     EntryType: Byte;
@@ -100,6 +115,42 @@ end;
 function SysWaitPID(PID, StatusAddress: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_WAITPID
+  int $80
+end;
+
+function SysEndpointCreate: QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_ENDPOINT_CREATE
+  int $80
+end;
+
+function SysIPCSend(Endpoint, MessageAddress: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_IPC_SEND
+  int $80
+end;
+
+function SysIPCReceive(Endpoint, MessageAddress: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_IPC_RECEIVE
+  int $80
+end;
+
+function SysCapabilityTransfer(TargetPID, Handle, Rights: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_CAP_TRANSFER
+  int $80
+end;
+
+function SysCapabilityReceive: QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_CAP_RECEIVE
+  int $80
+end;
+
+function SysCapabilityClose(Handle: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_CAP_CLOSE
   int $80
 end;
 

@@ -24,6 +24,10 @@ implementation
 {$I mistix_memory_object.inc}
 {$I mistix_address_space.inc}
 {$I mistix_cow.inc}
+{$I mistix_block.inc}
+{$I mistix_ext2.inc}
+{$I mistix_mount.inc}
+{$I mistix_net.inc}
 {$I mistix_vfs.inc}
 {$I mistix_process.inc}
 {$I mistix_syscall.inc}

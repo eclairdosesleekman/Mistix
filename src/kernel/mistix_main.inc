@@ -65,11 +65,13 @@ var
   InitFSStart: Pointer;
   InitFSEnd: Pointer;
   InitialPID: QWord;
+  I, MountSlot: LongWord;
+  DiskMountPath: array[0..9] of Char;
 begin
   SerialInit;
   WriteText(#13#10'============================================================'#13#10);
-  WriteText(' Mistix - Phase 5: UNIX foundation / Pascal userland        '#13#10);
-  WriteText(' Pascal freestanding kernel / VFS / pipes / shell           '#13#10);
+  WriteText(' Mistix - Phase 6: userland VFS / block / Ext2        '#13#10);
+  WriteText(' Pascal kernel / IPC VFS server / ATA PIO / Ext2 RO           '#13#10);
   WriteText('============================================================'#13#10);
 
   if not ValidateBootInformation then
@@ -94,6 +96,27 @@ begin
   MemoryObjectInitialize;
   COWInitialize;
   ProcessManagerInitialize;
+  BlockInitialize;
+  Ext2Initialize;
+  MountInitialize;
+  NetInitialize;
+  DiskMountPath[0] := '/'; DiskMountPath[1] := 'm';
+  DiskMountPath[2] := 'n'; DiskMountPath[3] := 't';
+  DiskMountPath[4] := '/'; DiskMountPath[5] := 'd';
+  DiskMountPath[6] := 'i'; DiskMountPath[7] := 's';
+  DiskMountPath[8] := 'k'; DiskMountPath[9] := #0;
+  for I := 0 to BLOCK_PARTITION_MAX - 1 do
+    if (BlockPartitions[I].Active <> 0) and
+       (BlockPartitions[I].TypeCode = $83) then
+    begin
+      if MountRegisterExt2(DiskMountPath,
+          BlockPartitions[I].DeviceIndex, BlockPartitions[I].StartLBA,
+          BlockPartitions[I].SectorCount, MountSlot) then
+        WriteText('[ OK ] Read-only Ext2 partition mounted in namespace at /mnt/disk.'#13#10)
+      else
+        WriteText('[WARN] Linux partition found, but Ext2 mount was rejected.'#13#10);
+      Break;
+    end;
   GetEmbeddedInitFS(InitFSStart, InitFSEnd);
   VFSInitialize(InitFSStart, InitFSEnd);
   VFSTestOK := VFSSelfTest;
@@ -103,7 +126,7 @@ begin
     HaltForever;
   end;
 
-  WriteText(#13#10'[PHASE 5] UNIX foundation initialised.'#13#10);
+  WriteText(#13#10'[PHASE 6] Storage and userland service bootstrap initialised.'#13#10);
   IPCTestOK := IPCRendezvousSelfTest;
   NotificationTestOK := NotificationSelfTest;
   MemoryObjectTestOK := MemoryObjectAliasSelfTest;
@@ -135,8 +158,9 @@ begin
 
   SyscallInitialize;
   TimerInitialize;
-  WriteText(#13#10'[PASS] Phase 5 VFS, InitFS, DevFS, descriptors, pipes and Pascal userland initialised.'#13#10);
-  WriteText('[NOTE] VFS is a bootstrap in-kernel core; move to userland service later.'#13#10);
+  WriteText(#13#10'[PASS] Phase 6 block, Ext2-RO, mount table, packet parser and userland services prepared.'#13#10);
+  WriteText('[NOTE] Legacy open/read syscalls still use the Phase 5 in-kernel VFS compatibility path.'#13#10);
+  WriteText('[NOTE] vfsd serves MFS1 via IPC; blockd is a volatile RAM block-service prototype.'#13#10);
   WriteText('[NOTE] Single CPU; legacy PIC/PIT; raw serial TTY; no SMP yet.'#13#10);
   WriteText('[NOTE] User syscalls: process/IPC, open/read/write/close, dup2, pipe,'#13#10);
   WriteText('       getdents, chdir, getcwd, spawn_path and getcmdline.'#13#10);
