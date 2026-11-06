@@ -76,6 +76,26 @@ asm
   mov rax, cr2
 end;
 
+function ReadCR0: QWord; assembler; nostackframe;
+asm
+  mov rax, cr0
+end;
+
+procedure WriteCR0(Value: QWord); assembler; nostackframe;
+asm
+  mov cr0, rdi
+end;
+
+function CPUEnableWriteProtect: Boolean;
+var
+  ControlRegister: QWord;
+begin
+  ControlRegister := ReadCR0;
+  ControlRegister := ControlRegister or (QWord(1) shl 16); { CR0.WP }
+  WriteCR0(ControlRegister);
+  Result := (ReadCR0 and (QWord(1) shl 16)) <> 0;
+end;
+
 function ReadCR3: QWord; assembler; nostackframe;
 asm
   mov rax, cr3
@@ -597,4 +617,12 @@ begin
     WriteText('[ OK ] CPU NX support enabled.'#13#10)
   else
     WriteText('[WARN] CPU has no NX support; execute-disable flags unavailable.'#13#10);
+
+  if CPUEnableWriteProtect then
+    WriteText('[ OK ] CR0.WP enabled; supervisor writes respect read-only PTEs.'#13#10)
+  else
+  begin
+    WriteText('[FAIL] Could not enable CR0.WP.'#13#10);
+    HaltForever;
+  end;
 end;

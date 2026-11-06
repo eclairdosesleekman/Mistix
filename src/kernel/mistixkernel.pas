@@ -22,6 +22,9 @@ implementation
 {$I mistix_ipc.inc}
 {$I mistix_notification.inc}
 {$I mistix_memory_object.inc}
+{$I mistix_address_space.inc}
+{$I mistix_process.inc}
+{$I mistix_syscall.inc}
 {$I mistix_main.inc}
 
 end.

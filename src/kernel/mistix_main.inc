@@ -69,11 +69,16 @@ var
   IPCTestOK: Boolean;
   NotificationTestOK: Boolean;
   MemoryObjectTestOK: Boolean;
+  ProcessCapTestOK: Boolean;
+  UserImageStart: Pointer;
+  UserImageEnd: Pointer;
+  UserImageSize: QWord;
+  InitialPID: QWord;
 begin
   SerialInit;
   WriteText(#13#10'=================================================='#13#10);
-  WriteText(' Mistix - Phase 2: IPC and capability kernel       '#13#10);
-  WriteText(' Pascal freestanding kernel / x86-64              '#13#10);
+  WriteText(' Mistix - Phase 3: user processes and syscall ABI  '#13#10);
+  WriteText(' Pascal freestanding microkernel / x86-64          '#13#10);
   WriteText('=================================================='#13#10);
 
   if not ValidateBootInformation then
@@ -96,23 +101,45 @@ begin
   IPCInitialize;
   NotificationInitialize;
   MemoryObjectInitialize;
+  ProcessManagerInitialize;
 
-  WriteText(#13#10'[PHASE 2] Running kernel subsystem self-tests.'#13#10);
+  WriteText(#13#10'[PHASE 3] Re-running kernel IPC and memory self-tests.'#13#10);
   IPCTestOK := IPCRendezvousSelfTest;
   NotificationTestOK := NotificationSelfTest;
   MemoryObjectTestOK := MemoryObjectAliasSelfTest;
-
-  if not IPCTestOK or not NotificationTestOK or not MemoryObjectTestOK then
+  ProcessCapTestOK := ProcessCapabilityIsolationSelfTest;
+  if not IPCTestOK or not NotificationTestOK or
+     not MemoryObjectTestOK or not ProcessCapTestOK then
   begin
-    WriteText('[FAIL] One or more Phase 2 self-tests failed.'#13#10);
+    WriteText('[FAIL] A kernel subsystem self-test failed.'#13#10);
     HaltForever;
   end;
 
-  WriteText(#13#10'[PASS] Phase 2 capability checks, blocking IPC, notifications,'#13#10);
-  WriteText('       and page-backed memory-object aliasing are alive.'#13#10);
-  WriteText('[NOTE] Capability table is kernel-global until process spaces exist.'#13#10);
-  WriteText('[NOTE] Scheduler is cooperative; IF remains disabled.'#13#10);
-  WriteText('Mistix Phase 2 halted cleanly.'#13#10);
+  GetEmbeddedInitImage(UserImageStart, UserImageEnd);
+  if (UserImageStart = nil) or
+     (PtrUInt(UserImageEnd) <= PtrUInt(UserImageStart)) then
+  begin
+    WriteText('[FAIL] Embedded Pascal user ELF image is missing.'#13#10);
+    HaltForever;
+  end;
+  UserImageSize := QWord(PtrUInt(UserImageEnd) - PtrUInt(UserImageStart));
+  WriteText('[ OK ] Embedded Pascal user ELF image size=');
+  WriteDecimal(UserImageSize);
+  WriteText(' bytes.'#13#10);
+
+  if not ProcessCreateFromELF(UserImageStart, UserImageSize, InitialPID) then
+  begin
+    WriteText('[FAIL] Could not create initial user process.'#13#10);
+    HaltForever;
+  end;
+
+  SyscallInitialize;
+  WriteText(#13#10'[PASS] Phase 3 kernel address spaces, ELF loader, per-process');
+  WriteText(#13#10'       capabilities and ring-3 syscall entry are initialised.'#13#10);
+  WriteText('[NOTE] Single foreground process; no timer preemption or SMP yet.'#13#10);
+  WriteText('[NOTE] User syscalls: write(1/2), exit, getpid, yield.'#13#10);
+
+  ProcessRun(InitialPID);
   HaltForever;
 end;
 

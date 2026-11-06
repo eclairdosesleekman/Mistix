@@ -1,79 +1,106 @@
-# Mistix — Phase 2（x86-64 / Pascal マイクロカーネル基盤）
+# Mistix — Phase 3（Ring 3 / Process / ELF64 / Syscall）
 
-Phase 2 は Phase 1 の CPU・メモリ管理基盤に、Capability、Endpoint IPC、Notification、ページバックされた Memory Object を追加します。
+Mistix Phase 3 は Phase 2 の x86-64 Pascal マイクロカーネルを引き継ぎ、**独立したユーザー仮想アドレス空間を持つ最初のユーザープロセスを Ring 3 で実行する**ための基盤を追加します。
 
-カーネルは引き続き **freestanding Free Pascal の単一 unit** として構築します。機能別 `.inc` は同一の Pascal unit に展開されます。C ソース、C ランタイム、ホスト OS のランタイムはリンクしません。
+カーネルは Free Pascal の freestanding unit として構築します。初期ユーザープログラムも Pascal unit としてコンパイルし、ELF64 実行ファイルにリンクします。C ソースや C ランタイムは使用しません。CPU 特権遷移、CR3 操作、割り込み入口などの一部には Pascal ソース内の x86-64 inline assembly を使用します。
 
-## 実装内容
+## Phase 3 の実装範囲
 
-### Capability
+### 1. プロセスごとのアドレス空間
 
-- 世代番号付き 32-bit ハンドル（上位16-bit generation、下位16-bit slot+1）。
-- 固定サイズの capability table。
-- オブジェクト種別、オブジェクト index/generation、権限ビットを保持。
-- 権限を増やせない `CapabilityRestrict`。
-- stale handle、無効 slot、権限不足の検出。
-- オブジェクト破棄時の関連 capability 一括 revoke。
+- 物理ページを使って独立した PML4 root を作成。
+- Limine が構築した PML4 の上位半分（256〜511）を共有し、カーネル／HHDM のマッピングを維持。
+- 下位半分はプロセスごとに独立。
+- ユーザー領域は PTE_USER を各ページテーブル階層で設定。
+- ELF のコードは RX、データは RW/NX、スタックは RW/NX としてマップ。
+- CR3 を切り替えてプロセスのアドレス空間を有効化。
+- プロセス破棄時に下位半分のユーザーページとページテーブルを回収。
 
-Phase 2 はまだユーザープロセスを持たないため、capability table は**カーネル全体で共有するブートストラップ空間**です。ユーザーモードの隔離境界として完成したものではありません。Phase 3 でプロセスごとの capability space に移します。
+CR3 の上位半分を共有する方式なので、カーネルコード、カーネルデータ、TSS、IDT、HHDM はどのプロセスからもカーネル特権でアクセスされます。上位 PML4 エントリーに USER 権限を与えないことが境界の要点です。
 
-### Endpoint / IPC
+### 2. ELF64 ローダー
 
-- 最大16 Endpoint。
-- Endpoint ごとに固定長8メッセージの FIFO キュー。
-- 1メッセージ最大6個の 64-bit word。
-- `IPCSend` はキュー満杯時に送信スレッドをブロック。
-- `IPCReceive` はキュー空時に受信スレッドをブロック。
-- enqueue/dequeue で待機スレッドを起床。
-- close 時に待機者を起床し、オブジェクト generation を無効化。
+現在の初期ローダーは次の形式に限定しています。
 
-IPC は現段階では単一CPU・協調スケジューラ上で動きます。ロックフリー／SMP セーフなキューではありません。割り込みハンドラから直接呼び出すことも想定していません。
+- ELF64、little-endian、x86-64。
+- ET_EXEC（固定仮想アドレスの実行ファイル）。
+- PT_LOAD のみをロード。
+- 最大32 program headers、最大256ユーザーページ。
+- `p_filesz <= p_memsz`、ファイル境界、仮想アドレス境界、ページ整列を検証。
+- W+X セグメントを拒否。
+- セグメントの `p_filesz` を物理ページへコピーし、残りの `p_memsz` はゼロ初期化。
+- エントリポイントがユーザー実行可能ページにあることを確認。
 
-### Notification
+動的リンク、ET_DYN/PIE、PT_INTERP、PT_DYNAMIC、TLS、リロケーション、共有ライブラリは未対応です。Phase 3 のユーザー実行には NX 対応 CPU を必須とします。
 
-- 最大16個の Notification object。
-- 64-bit pending bitset。
-- signal はビットを OR し、待機スレッドを起床。
-- wait は指定 mask に一致するビットを待ち、観測したビットだけを clear。
-- notification はイベントの coalescing を行います。同じビットの複数回 signal は pending 状態では一つにまとまります。
+### 3. ユーザースタック
 
-### Memory Object
+- 16ページ（64 KiB）の固定ユーザースタック。
+- スタックの下に未マップの guard page を確保。
+- 初期 RSP は SysV AMD64 の関数エントリ整列に合う値。
+- スタックページは RW/NX。
 
-- 最大8オブジェクト、1オブジェクトあたり最大16物理ページ。
-- PMM から物理ページを確保し、HHDM 経由でゼロ初期化。
-- 同じオブジェクトページを複数の仮想アドレスにマップ。
-- Capability により map/read/write/user-map/execute の要求を検証。
-- mapping が残っているオブジェクトの destroy は `krBusy` で拒否。
-- unmap は期待する物理ページと実際の PTE が一致することを確認。
+### 4. Ring 3 と syscall ABI
 
-Phase 2 の VMM は依然として Limine が作成した**単一の kernel address space**を利用します。したがって、同一 Memory Object の alias は実証しますが、異なるプロセス間の共有マッピングはまだ実装していません。独立 CR3 を持つプロセスができた段階で同じ物理ページを別々の root に map します。
+GDT の既存ユーザーセレクタを使用します。
 
-## スケジューラの拡張
+| セレクタ | 用途 |
+|---|---|
+| `0x28` | Ring 0 code（Limine 互換） |
+| `0x30` | Ring 0 data |
+| `0x3B` | Ring 3 data |
+| `0x43` | Ring 3 code |
 
-- `tsBlocked` 状態を追加。
-- wait key を使ったブロック／起床 API。
-- IPC と Notification が wait key を共有。
-- 最大12スレッドに拡張。
+Limine の初期スタックを離れて専用カーネルスタックへ移行した後、IDT vector `0x80` を DPL 3 の interrupt gate として設定し、TSS.RSP0 のカーネルスタックへ遷移します。syscall ABI は次の通りです。
 
-まだ協調型スケジューラです。割り込みは無効（IF=0）のままで、タイマーによるプリエンプションや SMP 同期はありません。ブロックした全スレッドに runnable な相手がいない場合は、現段階では進行不能として halt します。Phase 3 以降で idle thread と割り込み駆動の wakeup を導入します。
+| レジスタ | 意味 |
+|---|---|
+| RAX | syscall 番号／戻り値 |
+| RDI | 第1引数 |
+| RSI | 第2引数 |
+| RDX | 第3引数 |
 
-## 起動時自己テスト
+実装 syscall：
 
-カーネルは以下を実行します。
+| 番号 | 名前 | 動作 |
+|---:|---|---|
+| 1 | `write(fd, buf, len)` | fd 1/2 のみ。最大4096バイトを COM1 へ出力 |
+| 2 | `exit(status)` | 現在の初期プロセスを終了し、現段階ではカーネルを停止 |
+| 3 | `getpid()` | 現在の PID |
+| 4 | `yield()` | 現段階では no-op |
 
-1. Phase 1 の Limine / GDT / IDT / PMM / VMM 初期化。
-2. Capability table とオブジェクト registry の初期化。
-3. Endpoint を作成し、send-only に縮小した capability で receive が拒否されることを確認。
-4. 受信スレッドを先に実行してブロックし、送信スレッドが IPC メッセージを送って受信側が再開することを確認。
-5. Notification waiter をブロックさせ、signaler がビットを立てて waiter が再開することを確認。
-6. Memory Object の1物理ページを2仮想アドレスへ map し、一方への書き込みが他方から読めることを確認。
-7. alias を unmap し、Memory Object の物理ページを PMM に返す。
+`write` はユーザーアドレス範囲をページごとに検査してから読み出します。現在は単一CPU・割り込み無効の環境なので、検査後に別スレッドが同じユーザーページを変更する競合はありません。SMP やプリエンプションを導入する前に copy-in バッファ方式へ進化させる必要があります。
 
-シリアルログで `[PASS]` に到達すれば、上記の基本的な kernel self-test が成功したことを示します。
+### 5. プロセスごとの Capability Space
+
+`TKernelProcess` は独自の `TProcessCapabilitySpace` を持ちます。各空間は Phase 2 の Capability と同じ世代番号付きハンドル方式です。権限の追加は禁止し、restrict は権限を縮小するだけです。
+
+既存の Phase 2 カーネルサービス API はまだ kernel-global Capability Table を使用します。ユーザープロセスへ Endpoint / Memory Object の能力を移譲する IPC capability transfer は未実装であり、ユーザー syscall に公開していません。Phase 3 の自己テストは、ハンドルが別プロセス空間では解決されないことを確認します。
+
+## ソース構成
+
+```text
+mistix-phase3/
+├── src/kernel/
+│   ├── mistixkernel.pas
+│   ├── mistix_address_space.inc  # CR3 root、user page tables、ELF64
+│   ├── mistix_process.inc        # process table、per-process capability space
+│   ├── mistix_syscall.inc        # int 0x80、Ring 3 transition、syscall dispatch
+│   └── ...                       # Phase 1 / 2 のカーネルコード
+├── userland/
+│   ├── init/mistixinit.pas       # 最初の Pascal ユーザープログラム
+│   └── user.ld                  # user ELF64 linker script
+├── boot/limine.conf
+├── linker.ld
+├── Makefile
+└── tools/check_source.py
+```
+
+初期ユーザー ELF はビルド時に生成し、`ld -r -b binary` でカーネルのデータ領域へ埋め込みます。Limine module request に追加依存を作らず、Phase 3 の初回起動経路を単純化しています。
 
 ## ビルド環境
 
-x86-64 Linux 開発ホストに以下を用意してください。
+Linux x86-64 開発ホストに以下が必要です。
 
 - Free Pascal Compiler（FPC）3.2.x 以降を出発点として検証
 - GNU binutils（`ld`、`nm`、`readelf`）、GNU Make
@@ -85,36 +112,57 @@ git clone --branch v12.x https://github.com/limine-bootloader/limine.git ../limi
 make -C ../limine
 ```
 
-## ビルドと起動
+## ビルドと実行
 
 ```sh
 make clean
+make check-source
 make check-tools
+make user-verify
 make kernel
 make verify
 make iso LIMINE_DIR=../limine
 make run LIMINE_DIR=../limine
 ```
 
-QEMU は single CPU、256 MiB RAM で起動し、COM1 を標準入出力に接続します。
+`make user-verify` は Pascal ユーザー unit をコンパイルし、未解決ランタイムシンボルがないことを検査して ELF64 にリンクします。カーネルビルドはその ELF を埋め込みます。
 
-## 意図的に未実装の機能
+## 想定されるシリアル出力
 
-1. Capability table はプロセス単位ではなく kernel-global。
-2. Capability transfer / IPC message による capability の move / copy は未実装。
-3. ユーザーモードから安全に呼び出す syscall ABI は未実装。
-4. プロセスごとの仮想アドレス空間、CR3 切替は未実装。
-5. Memory Object の異なるプロセス間共有は未実装（同一 root 内 alias のみ）。
-6. IPC キューと capability table は固定容量で、動的拡張しない。
-7. IPC timeout、優先度継承、キャンセル、複数 CPU 同期は未実装。
-8. Notification は bitset 型であり、イベント回数や順序を保持しない。
-9. Endpoint の queue full / empty 時はブロッキングのみ。nonblocking API は未実装。
-10. すべてのロック／待機操作は現段階の単一CPU・割り込み無効の実行文脈を前提とする。
+実機での実測ログではなく、自己テスト成功時に期待されるログの例です。
 
-## Pascal とアセンブリの境界
+```text
+[ OK ] GDT loaded; Limine selectors preserved; 64-bit TSS installed.
+[ OK ] CR0.WP enabled; supervisor writes respect read-only PTEs.
+[ OK ] PMM bitmap initialised.
+[ OK ] VMM attached to Limine 4-level page tables.
+[ OK ] Process manager initialised (8 process slots; per-process capability spaces).
+[ OK ] Per-process capability isolation self-test passed.
+[ OK ] Embedded Pascal user ELF image size=... bytes.
+[ OK ] Loaded ELF64 user process pid=1 entry=... CR3=...
+[ OK ] DPL-3 int 0x80 syscall gate installed.
+[PASS] Phase 3 kernel address spaces, ELF loader, per-process
+       capabilities and ring-3 syscall entry are initialised.
+[ OK ] Entering ring 3: pid=1 CS=0x43 SS=0x3B.
+Hello from Mistix ring 3!
+[PROCESS] user process pid=1 exited with code 0.
+```
 
-OS のロジック、型、キュー、Capability 検査、Memory Object 管理は Pascal です。CPU 固有命令、I/O port access、IDT/GDT 操作、CR レジスタ操作、TLB invalidation、コンテキストスイッチには Pascal ソース内のインラインアセンブリを使用します。C と C ランタイムは使用しません。
+## 既知の制約と未実装
+
+1. シングルCPUのみ。SMP、ロック、TLB shootdown は未対応。
+2. IF は無効のまま。タイマー割り込みとプリエンプティブスケジューリングは未実装。
+3. 初回実装ではフォアグラウンドのユーザープロセスを1つだけ起動。プロセス間コンテキストスイッチは未実装。
+4. `exit` はプロセスを terminated にしてカーネルを halt。親子プロセス、wait、spawn、fork は未実装。
+5. `yield` は no-op。
+6. syscall は `int 0x80` を使用。`SYSCALL/SYSRET` MSR 経路は未実装。
+7. 例外はまだカーネル致命的エラーとして停止。ユーザープロセス単位の fault kill は未実装。
+8. ELF は静的 ET_EXEC のみ。PIE、動的 linker、relocation、shared library は未対応。
+9. Capability Space はプロセスごとに確保するが、Capability transfer とユーザー向け IPC syscall は未実装。
+10. 共有メモリの異なるプロセス間マッピングは未実装。Phase 2 の alias test は従来どおり kernel root 上で行う。
+11. syscall `write` は COM1 へ直接出力し、VFS / terminal server はまだ利用しない。
+12. syscall 入力ポインタはページ単位で検証する。将来の SMP / preemption 前にカーネルバッファへの copy-in を導入する。
 
 ## 検証状況
 
-この作業環境には FPC と QEMU がないため、Phase 2 ソースの実コンパイル／起動試験は**未実施**です。Makefile のビルド定義、ソース構造、依存関係は整えていますが、`make verify` と QEMU シリアルログの `[PASS]` を確認するまでは実機・仮想マシンで検証済みとは扱わないでください。
+この生成環境には FPC と QEMU がないため、Pascal ソースの実コンパイルと仮想マシン起動は**未実施**です。ソース構成チェッカー、Makefile のドライラン、および GNU ld による user linker script / ELF program-header / embedded-blob シンボルの独立確認を行いました。`make verify` と QEMU のシリアルログで実測するまでは、実行確認済みとは扱わないでください。
