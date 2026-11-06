@@ -55,7 +55,8 @@ type
   end;
 
   TVFSOpenKind = (voFree, voRegular, voDirectory, voConsole, voNull,
-                  voSerial, voPipeRead, voPipeWrite, voRemote);
+                  voSerial, voPipeRead, voPipeWrite, voRemote,
+                  voRemoteDirectory);
   TVFSOpenDescription = record
     Active: Byte;
     Kind: TVFSOpenKind;
@@ -545,7 +546,8 @@ begin
   Kind := VFSOpenDescriptions[DescriptionIndex].Kind;
   PipeIndex := VFSOpenDescriptions[DescriptionIndex].PipeIndex;
   RemoteHandle := VFSOpenDescriptions[DescriptionIndex].RemoteHandle;
-  if (Kind = voRemote) and (RemoteHandle <> 0) then
+  if ((Kind = voRemote) or (Kind = voRemoteDirectory)) and
+     (RemoteHandle <> 0) then
     VFSQueueRemoteClose(RemoteHandle);
   VFSOpenDescriptions[DescriptionIndex].Active := 0;
   VFSOpenDescriptions[DescriptionIndex].RefCount := 0;
@@ -615,6 +617,20 @@ begin
   if Result < 0 then VFSReleaseDescription(DescriptionIndex);
 end;
 
+function VFSAllocateRemoteDirectoryFD(var Files: TVFSProcessFiles;
+  RemoteHandle: QWord; Flags: LongWord): LongInt;
+var
+  DescriptionIndex: LongInt;
+begin
+  Result := -1;
+  if RemoteHandle = 0 then Exit;
+  DescriptionIndex := VFSAllocateDescription(voRemoteDirectory, -1, -1, Flags);
+  if DescriptionIndex < 0 then Exit;
+  VFSOpenDescriptions[DescriptionIndex].RemoteHandle := RemoteHandle;
+  Result := VFSAllocateFD(Files, DescriptionIndex);
+  if Result < 0 then VFSReleaseDescription(DescriptionIndex);
+end;
+
 function VFSIsRemoteFD(var Files: TVFSProcessFiles; FD: QWord;
   out RemoteHandle: QWord; out Flags: LongWord;
   out DescriptionIndex: LongInt): Boolean;
@@ -627,6 +643,20 @@ begin
   if VFSOpenDescriptions[DescriptionIndex].Kind <> voRemote then Exit;
   RemoteHandle := VFSOpenDescriptions[DescriptionIndex].RemoteHandle;
   Flags := VFSOpenDescriptions[DescriptionIndex].Flags;
+  Result := RemoteHandle <> 0;
+end;
+
+function VFSIsRemoteDirectoryFD(var Files: TVFSProcessFiles; FD: QWord;
+  out RemoteHandle: QWord): Boolean;
+var
+  DescriptionIndex: LongInt;
+begin
+  Result := False;
+  RemoteHandle := 0;
+  DescriptionIndex := VFSFDDescription(Files, FD);
+  if DescriptionIndex < 0 then Exit;
+  if VFSOpenDescriptions[DescriptionIndex].Kind <> voRemoteDirectory then Exit;
+  RemoteHandle := VFSOpenDescriptions[DescriptionIndex].RemoteHandle;
   Result := RemoteHandle <> 0;
 end;
 
@@ -848,7 +878,8 @@ begin
     Result := VFS_ERR_FAULT;
     Exit;
   end;
-  if (Kind = voDirectory) or (Kind = voPipeWrite) then
+  if (Kind = voDirectory) or (Kind = voRemoteDirectory) or
+     (Kind = voPipeWrite) then
   begin
     Result := VFS_ERR_INVAL;
     Exit;
