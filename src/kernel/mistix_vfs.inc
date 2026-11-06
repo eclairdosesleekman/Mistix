@@ -15,6 +15,7 @@ const
   VFS_O_RDONLY = 0;
   VFS_O_WRONLY = 1;
   VFS_O_RDWR = 2;
+  VFS_O_CREAT = $40;
   VFS_O_DIRECTORY = $100;
 
   VFS_DIRENT_FILE = 1;
@@ -54,7 +55,7 @@ type
   end;
 
   TVFSOpenKind = (voFree, voRegular, voDirectory, voConsole, voNull,
-                  voSerial, voPipeRead, voPipeWrite);
+                  voSerial, voPipeRead, voPipeWrite, voRemote);
   TVFSOpenDescription = record
     Active: Byte;
     Kind: TVFSOpenKind;
@@ -63,6 +64,7 @@ type
     PipeIndex: LongInt;
     Position: QWord;
     Flags: LongWord;
+    RemoteHandle: QWord;
   end;
 
   TVFSPipe = record
@@ -519,15 +521,19 @@ begin
       VFSOpenDescriptions[I].PipeIndex := PipeIndex;
       VFSOpenDescriptions[I].Position := 0;
       VFSOpenDescriptions[I].Flags := Flags;
+      VFSOpenDescriptions[I].RemoteHandle := 0;
       Result := LongInt(I);
       Exit;
     end;
 end;
 
+procedure VFSQueueRemoteClose(RemoteHandle: QWord); forward;
+
 procedure VFSReleaseDescription(DescriptionIndex: LongInt);
 var
   Kind: TVFSOpenKind;
   PipeIndex: LongInt;
+  RemoteHandle: QWord;
 begin
   if (DescriptionIndex < 0) or (DescriptionIndex >= VFS_OPEN_MAX) then Exit;
   if VFSOpenDescriptions[DescriptionIndex].Active = 0 then Exit;
@@ -538,9 +544,13 @@ begin
   end;
   Kind := VFSOpenDescriptions[DescriptionIndex].Kind;
   PipeIndex := VFSOpenDescriptions[DescriptionIndex].PipeIndex;
+  RemoteHandle := VFSOpenDescriptions[DescriptionIndex].RemoteHandle;
+  if (Kind = voRemote) and (RemoteHandle <> 0) then
+    VFSQueueRemoteClose(RemoteHandle);
   VFSOpenDescriptions[DescriptionIndex].Active := 0;
   VFSOpenDescriptions[DescriptionIndex].RefCount := 0;
   VFSOpenDescriptions[DescriptionIndex].Kind := voFree;
+  VFSOpenDescriptions[DescriptionIndex].RemoteHandle := 0;
   if (PipeIndex >= 0) and (PipeIndex < VFS_PIPE_MAX) then
   begin
     if (Kind = voPipeRead) and (VFSPipes[PipeIndex].Readers > 0) then
@@ -588,6 +598,36 @@ begin
   Result := Files.FDs[FD].Description;
   if (Result < 0) or (Result >= VFS_OPEN_MAX) then Result := -1;
   if (Result >= 0) and (VFSOpenDescriptions[Result].Active = 0) then Result := -1;
+end;
+
+
+function VFSAllocateRemoteFD(var Files: TVFSProcessFiles;
+  RemoteHandle: QWord; Flags: LongWord): LongInt;
+var
+  DescriptionIndex: LongInt;
+begin
+  Result := -1;
+  if RemoteHandle = 0 then Exit;
+  DescriptionIndex := VFSAllocateDescription(voRemote, -1, -1, Flags);
+  if DescriptionIndex < 0 then Exit;
+  VFSOpenDescriptions[DescriptionIndex].RemoteHandle := RemoteHandle;
+  Result := VFSAllocateFD(Files, DescriptionIndex);
+  if Result < 0 then VFSReleaseDescription(DescriptionIndex);
+end;
+
+function VFSIsRemoteFD(var Files: TVFSProcessFiles; FD: QWord;
+  out RemoteHandle: QWord; out Flags: LongWord;
+  out DescriptionIndex: LongInt): Boolean;
+begin
+  Result := False;
+  RemoteHandle := 0;
+  Flags := 0;
+  DescriptionIndex := VFSFDDescription(Files, FD);
+  if DescriptionIndex < 0 then Exit;
+  if VFSOpenDescriptions[DescriptionIndex].Kind <> voRemote then Exit;
+  RemoteHandle := VFSOpenDescriptions[DescriptionIndex].RemoteHandle;
+  Flags := VFSOpenDescriptions[DescriptionIndex].Flags;
+  Result := RemoteHandle <> 0;
 end;
 
 procedure VFSProcessCloseAll(var Files: TVFSProcessFiles); forward;

@@ -1,100 +1,77 @@
-# Mistix Phase 8 — ATA block broker とユーザーランド Ext2
+# Mistix Phase 9 — ユーザーランド VFS syscall broker
 
-Mistix Phase 8 は Phase 7 の x86-64 / Limine / Pascal カーネルを引き継ぎ、物理 ATA ディスクの読み取りを制限付き syscall と `blockd` RPC に集約し、ユーザーランド `vfsd` から Ext2 を読み取り専用で利用する開発スナップショットです。
+Mistix Phase 9 は Phase 8 の x86-64 / Limine / Pascal カーネルを引き継ぎ、通常の `open()` / `read()` / `write()` / `close()` syscall からユーザーランド `vfsd` へ IPC リクエストを転送するブートストラップ VFS broker を追加した開発スナップショットです。
 
-> **検証上の注意:** この成果物はソース・ビルド構成をまとめた開発スナップショットです。この実行環境には Free Pascal Compiler (FPC) と QEMU がないため、FPC 実コンパイルおよび仮想マシン起動は未確認です。`make check-source` はソース構造チェックであり、Pascal コンパイラの代替ではありません。
+> **検証上の注意:** この実行環境には Free Pascal Compiler (FPC) と QEMU がないため、Pascal 実コンパイルおよび仮想マシン起動は未確認です。`make check-source` は構造・ABI の静的チェックであり、FPC コンパイルや実行時検証の代替ではありません。
 
-## Phase 8 の主な変更
+## Phase 9 の主な変更
 
-### 1. 制限付き ATA ブロック読み取り ABI
+### 1. 通常ファイル syscall の VFS broker 化
 
-`src/kernel/mistix_block.inc` と `src/kernel/mistix_syscall.inc` に block-service 専用 ABI を追加しました。
+カーネルに `vfs_register()` syscall 31 を追加しました。PID 1 が起動した直接の子 `vfsd` と request/reply Endpoint を登録すると、通常ファイルに対する syscall をユーザーランドサーバーへ委譲します。
 
-| syscall | ID | 用途 |
-|---|---:|---|
-| `block_register()` | 28 | ブート時 block service を登録 |
-| `block_info()` | 29 | 物理ディスクの容量・セクタサイズを取得 |
-| `block_read(lba, sectors, buffer)` | 30 | 物理ディスクを読み取り |
-
-制限事項:
-
-- 登録は PID 1 の直接の子プロセスに限定し、登録は一度だけです。
-- 読み取り API のみを公開します。物理ディスクへの write syscall は追加していません。
-- 1 syscall あたり最大128セクタ（64 KiB）です。
-- バッファは呼び出し元プロセスのユーザー領域として検証されます。
-- これはブートストラップ用の単一 blockd 登録方式です。汎用デバイス Capability モデルへの完全統合ではありません。
-
-### 2. `blockd` の物理 ATA / RAM バックエンド
-
-`userland/block/mistixblockd.pas` は起動時に `block_register()` を呼び、ハードウェアが存在すれば ATA PIO の読み取り専用バックエンドを使います。物理ディスクがない QEMU 環境では従来の64 KiB揮発性 RAM ディスクにフォールバックします。
-
-RPC:
-
-- `INFO`: sector count、sector size、byte capacity、backend flag を返す
-- `READ`: バイト範囲を読み、共有メモリ窓へ転送
-- `WRITE`: RAM fallback のみ書き込み可能。物理 ATA backend は `EROFS`
-
-ATA の読み取りでは必要なセクタ範囲を計算し、カーネルの block-read syscall でセクタを取得して、要求されたバイト範囲だけ共有メモリへコピーします。ブート時自己テストは物理ディスクに書き込みません。
-
-### 3. ユーザーランド `vfsd` 内の Ext2 読み取り専用クライアント
-
-`userland/vfs/mistix_ext2_client.inc` と `mistix_ext2_types.inc` を追加しました。`vfsd` は IPC で `blockd` に接続し、ディスクデータを共有メモリ RPC で読み込みます。
-
-対応範囲:
-
-- 512-byte sector の blockd backend
-- MBR の最初の primary Linux (`0x83`) partition、または partition table のない raw Ext2 image
-- Ext2 block size 1 KiB / 2 KiB / 4 KiB
-- superblock、group descriptor、inode、directory entry
-- direct block および single-indirect block
-- 読み取り専用の `OPEN` / `READ` / `STAT` / `READDIR`
-- マウントポイント `/mnt/disk`
-
-安全側に倒すため、次の形式・機能はマウント拒否または未対応です:
-
-- Ext3 journal / journal replay
-- Ext4 extents や未対応 incompat feature
-- GPT、extended/logical partition、複数 partition の探索
-- double / triple indirect block
-- Ext2 への永続書き込み、create、unlink、rename
-
-`/tmp` の揮発性オーバーレイは従来どおり `vfsd` 内の RAM 上で動作します。
-
-### 4. VFS RPC
-
-追加した RPC:
-
-| RPC | 内容 |
+| syscall | 動作 |
 |---|---|
-| `MOUNT_EXT2` | blockd backend 上の Ext2 を `/mnt/disk` に read-only mount |
-| `READDIR` | `/mnt/disk` 配下のディレクトリを列挙し、dirent 配列を共有メモリに返す |
+| `open(path, flags)` | `vfsd` の MFS1 / `/tmp` / Ext2 read-only namespace で開く |
+| `read(fd, buf, count)` | broker RPC と共有メモリ経由で読み込む |
+| `write(fd, buf, count)` | broker RPC と共有メモリ経由で書き込む（現状 `/tmp` のみ） |
+| `close(fd)` | リモート open description の最終参照を非同期 CLOSE で解放 |
 
-既存の `OPEN` / `READ` / `STAT` は MFS1、`/tmp`、Ext2 の各データソースを区別します。
+`/dev/console`、`/dev/serial`、`/dev/null` と `O_DIRECTORY` は既存のカーネル内デバイス／ディレクトリ処理を維持します。ディレクトリ列挙 (`getdents`) と `chdir/getcwd` もまだカーネル内 VFS 経路です。
 
-**重要:** Phase 8 でも、一般アプリケーションが呼ぶカーネル `open()` / `read()` syscall はまだ Phase 5 のカーネル内 VFS 経路を使用します。ユーザーランド `vfsd` は IPC サービスとして Ext2 を提供しますが、標準ファイル syscall 全体の broker 化は完了していません。次段階で VFS client syscall shim と descriptor proxy を導入する必要があります。
+### 2. Remote file description
+
+カーネルの `TVFSOpenDescription` に `voRemote` と `RemoteHandle` を追加しました。FD はローカルの open-description table を参照し、同じ description を `dup2()` や `fork()` で共有するため、リモートハンドルとファイル位置も共有されます。
+
+最後のローカル参照がなくなると、`VFSReleaseDescription` が CLOSE を小さな固定長キューへ登録します。`close()`、`dup2()` の置換、プロセス終了を同じ経路で処理し、broker の次の機会に非同期 CLOSE を vfsd へ送ります。サーバーが停止した場合は古いハンドルを再起動後のサーバーへ誤送信しないよう、保留 CLOSE を破棄します。
+
+### 3. IPC protocol と共有メモリ
+
+Phase 8 の IPC message ABI を変更せず、既存の6ワードメッセージを利用します。broker は同時に1件の VFS transaction のみを実行し、transaction ID と呼び出し元 PID で応答を対応付けます。`EAGAIN` 再試行時には owner PID、operation、remote handle、user buffer、byte count、flags、OPEN の正規化済みパス全体を照合し、別要求の応答を誤って消費しないようにします。要求内容が変わった再試行は `EBUSY` になります。
+
+- OPEN: 128-byte path buffer と flags
+- READ: remote handle と最大4096-byte length。返却データは共有メモリ窓
+- WRITE: remote handle と最大4096-byte length。入力データは共有メモリ窓
+- CLOSE: remote handle。最終参照解放時は transaction ID 0 の非同期要求
+
+PID 1 と vfsd の共有窓については、単に同じ仮想アドレスがマップされているだけでなく、全16ページの物理ページ番号と user/writable flags が一致することを登録時に検証します。
+
+request/reply Endpoint の capability、vfsd が PID 1 の直接の子であること、プロセス状態、共有ページの対応関係を登録時に検証します。broker の RPC slot は単一 CPU 向けであり、SMP ロックや複数 outstanding request はまだありません。
+
+### 4. vfsd の通常ファイル API
+
+ユーザーランド vfsd は broker 用 OPEN/READ/WRITE/CLOSE RPC を処理します。
+
+| データソース | 読み込み | 書き込み |
+|---|---:|---:|
+| MFS1 初期アーカイブ | 対応 | 読み取り専用 |
+| `/tmp` RAM overlay | 対応 | 対応 |
+| `/mnt/disk` Ext2 | 対応 | 読み取り専用 |
+
+`O_CREAT` は `/tmp` overlay に限定しています。`write()` は現時点で最大4096 bytesの部分書き込みです。`SysWriteAll` は部分書き込みを繰り返しますが、エラー時に無限再試行しないようにしています。
+
+### 5. リモート FD の終了処理
+
+open description の最終参照解放時に remote CLOSE をキューへ入れます。これにより通常 `close()` だけでなく、`dup2()` の置換や `VFSProcessCloseAll()` の経路でもサーバー側ハンドルを解放できます。broker は非同期 CLOSE の応答（transaction ID 0）を通常要求の応答として誤認しません。
 
 ## 起動時テスト
 
-`init` は `blockd` を先に起動し、共有メモリと request/reply capability を渡した後、`vfsd` に blockd RPC capability を追加で渡します。
+`init` は Phase 8 と同じ順序で blockd と vfsd を起動し、既存の direct RPC smoke test を済ませた後に `vfs_register()` を実行します。その後は一般 syscall を通じて以下を確認します。
 
-テスト項目:
+1. `/etc/motd` を `open/read/close` で読み出す。
+2. `/tmp/phase9.txt` を `O_RDWR | O_CREAT` で開く。
+3. 標準 `write()` でデータを書き込む。
+4. close 後に再 open/read し、内容が一致することを検証する。
+5. 標準出力の `/dev/console` は従来どおりカーネル内デバイス FD で出力する。
 
-1. blockd registration と `INFO`
-2. RAM fallback の場合は共有メモリ READ/WRITE round-trip
-3. 物理 ATA の場合は LBA 0 の read-only RPC（書き込みなし）
-4. vfsd RPC v3 handshake
-5. Ext2 mount（ディスクが無ければ正常に unmounted と報告）
-6. Ext2 root directory enumeration（mount が成功した場合）
-7. MFS1 `/etc/motd` の read
-8. `/tmp` overlay create/write/read
-9. device registry と loopback network service の既存テスト
+このテストコードは起動時に実行する設計ですが、QEMU で実行した結果ではありません。
 
 ## ビルド
 
 Linux x86-64 開発環境で FPC、GNU binutils、GNU Make、Python 3、xorriso、QEMU、Limine v12 を用意します。
 
 ```sh
-cd mistix-phase8
+cd mistix-phase9
 make clean
 make check-source
 make check-tools
@@ -105,54 +82,40 @@ make iso LIMINE_DIR=../limine
 make run LIMINE_DIR=../limine
 ```
 
-ディスクイメージを QEMU の primary IDE disk として添付する場合:
+Ext2 raw disk image を IDE primary disk として添付する場合:
 
 ```sh
 make run LIMINE_DIR=../limine DISK_IMAGE=../mistix-ext2.img
 ```
 
-`mistix-ext2.img` は、先頭に MBR がある場合は最初の primary type `0x83` partition に Ext2 を置くか、partition table のない raw Ext2 image にしてください。Ext2 は読み取り専用で開きます。
-
-raw Ext2 の簡易テストイメージは、ホストに `mke2fs` と `debugfs` がある場合、例えば次のように作成できます。
-
-```sh
-truncate -s 64M ../mistix-ext2.img
-mke2fs -t ext2 -F -b 4096 -O ^dir_index ../mistix-ext2.img
-debugfs -w -R "write docs/motd.txt /hello.txt" ../mistix-ext2.img
-make run LIMINE_DIR=../limine DISK_IMAGE=../mistix-ext2.img
-```
-
-`dir_index` はこの parser が未対応のため無効にします。イメージの作成はホスト側で行い、Mistix からは read-only で参照します。
-
-## ソースツリーの主な追加・変更
+## 主なソースツリー
 
 ```text
-mistix-phase8/
+mistix-phase9/
 ├── src/kernel/
-│   ├── mistix_block.inc       # BlockServerPID 登録状態
-│   └── mistix_syscall.inc     # block_register/info/read syscall
+│   ├── mistix_vfs.inc       # voRemote / remote handle / close queue hook
+│   └── mistix_syscall.inc   # vfs_register と open/read/write/close broker
 ├── userland/
-│   ├── common/mistixlib.inc   # block service syscall wrapper
-│   ├── block/mistixblockd.pas # ATA read-only / RAM backend
-│   ├── vfs/
-│   │   ├── mistixvfsd.pas
-│   │   ├── mistix_ext2_types.inc
-│   │   └── mistix_ext2_client.inc
-│   └── init/mistixinit.pas    # service capability bootstrap/tests
-├── docs/PHASE8-DESIGN.md
+│   ├── common/mistixlib.inc # syscall raw stub と EAGAIN retry wrappers
+│   ├── init/mistixinit.pas # broker 登録と標準 syscall の read/write test
+│   └── vfs/mistixvfsd.pas  # broker OPEN/READ/WRITE/CLOSE RPC
+├── docs/PHASE9-DESIGN.md
 └── tools/check_source.py
 ```
 
-## 既知の制約と次の作業
+## 既知の制約
 
-- FPC による実コンパイルと QEMU 起動試験は未実施です。
-- ATA ドライバは primary master / LBA28 の既存カーネル実装を利用し、AHCI / NVMe / LBA48 は未対応です。x86 PIO の実際の I/O 命令は特権モードのカーネル側に残り、`blockd` は制限された読み取り syscall だけを呼び出します。
-- 既存のカーネル起動処理は互換性のため独自の read-only Ext2 namespace も初期化します。Phase 8 の `vfsd` は別のユーザーランド Ext2 実装で同じ物理ディスクを RPC 経由で読みます。カーネル側 Ext2 / block 経路を削除したわけではありません。
-- Ext2 は read-only の限定実装です。
-- `vfsd` の RPC は独立していますが、通常の FD syscall はまだ kernel VFS を通ります。
-- `READDIR` の固定 `TMistixDirent` ABI は名前を最大63バイトに制限し、1回あたり最大128件です。それを超えるディレクトリはエラーになります。
-- block service 登録は PID 1 直下の最初の1サービスに限定した bring-up 用です。
-- `blockd` の physical read syscall は単一の 64 KiB kernel scratch buffer を使うため、同時 read の並列化は行いません。
-- shared-memory object の完全な参照カウント・破棄やプロセス間の fork 継承は未完了です。
+- FPC 実コンパイル、ISO 作成、QEMU 起動は未確認です。
+- broker はグローバルに1つの vfsd を登録するブートストラップ実装で、登録権限は PID 1 に限定しています。
+- broker は同時に1件の transaction のみ処理します。複数プロセスは `EAGAIN` を受け、ユーザーランド wrapper が `yield()` して再試行します。同じ slot の再試行では要求パラメータと OPEN パスを完全一致で検証し、別要求へのすり替えを `EBUSY` で拒否します。
+- syscall 1回の VFS I/O 上限は4096 bytesです。長い転送は呼び出し元が分割します。
+- `getdents()`、`chdir()`、`getcwd()`、`O_DIRECTORY` はまだカーネル内 VFS を利用します。Ext2 ディレクトリを通常 `ls` で列挙するための userland directory-FD proxy は未実装です。
+- `/dev/*` はカーネル内デバイス処理を維持します。
+- 書き込み可能なのは `/tmp` overlay のみです。MFS1 と Ext2 は読み取り専用で、Ext2 journal、create/unlink/rename、永続 write は未対応です。
+- broker が永久に応答しない場合、wrapper は有限回の yield/retry 後に `EAGAIN` を返します。タイムアウトを監視する watchdog や要求キャンセルはありません。
+- broker の共有メモリ窓は単一グローバル領域であり、複数 outstanding request や SMP 並列には対応しません。
+- vfsd の再起動ポリシー、プロセスごとの broker 再接続、サーバー死亡時に開いていた FD の自動再オープンは未実装です。
+- remote close queue は固定長です。ブローカーが長時間停止した状態で大量のファイルを開閉した場合の永続化は行いません。
+- `fork()` 後は remote open description を共有し、ファイル位置も共有します。Copy-on-Write と同様の UNIX 共有 open-file-description の意味論を意図しています。
 
-次の段階では、`open/read/getdents` syscall をユーザーランド VFS proxy に切り替え、ファイルディスクリプタと RPC request を非同期に対応付ける必要があります。その後に Ext2 write transaction と block-device write capability を別途設計します。
+次段階では `getdents/chdir/getcwd` の broker 化、複数 outstanding RPC、キャンセル／タイムアウト、vfsd 再起動後の FD 回復、UID/GID/mode、Ext2 write transaction を進めます。

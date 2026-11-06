@@ -958,6 +958,7 @@ begin
 end;
 
 procedure P7ShmReleaseProcess(ProcessIndex: LongWord); forward;
+procedure VFSBrokerFlushRemoteCloses; forward;
 
 procedure ProcessTerminateIndex(ProcessIndex: LongWord; ExitCode: QWord);
 begin
@@ -967,6 +968,7 @@ begin
   ProcessTable[ProcessIndex].ExitCode := ExitCode;
   P7ShmReleaseProcess(ProcessIndex);
   VFSProcessCloseAll(ProcessTable[ProcessIndex].Files);
+  VFSBrokerFlushRemoteCloses;
   ProcessTable[ProcessIndex].State := psZombie;
   ProcessWakeParentOnExit(ProcessIndex);
 end;

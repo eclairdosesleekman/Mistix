@@ -70,8 +70,8 @@ var
 begin
   SerialInit;
   WriteText(#13#10'============================================================'#13#10);
-  WriteText(' Mistix - Phase 8: ATA block broker / userland Ext2 / VFS '#13#10);
-  WriteText(' Pascal kernel / IPC VFS server / ATA PIO / Ext2 RO           '#13#10);
+  WriteText(' Mistix - Phase 9: userland VFS syscall broker                '#13#10);
+  WriteText(' Pascal microkernel / IPC / remote file descriptors            '#13#10);
   WriteText('============================================================'#13#10);
 
   if not ValidateBootInformation then
@@ -127,7 +127,7 @@ begin
     HaltForever;
   end;
 
-  WriteText(#13#10'[PHASE 8] Shared-memory and userland service bootstrap initialised.'#13#10);
+  WriteText(#13#10'[PHASE 9] Userland VFS broker bootstrap initialised.'#13#10);
   IPCTestOK := IPCRendezvousSelfTest;
   NotificationTestOK := NotificationSelfTest;
   MemoryObjectTestOK := MemoryObjectAliasSelfTest;
@@ -159,9 +159,9 @@ begin
 
   SyscallInitialize;
   TimerInitialize;
-  WriteText(#13#10'[PASS] Phase 8 kernel foundations and userland service bootstrap prepared.'#13#10);
-  WriteText('[NOTE] Legacy open/read syscalls still use the kernel VFS compatibility path.'#13#10);
-  WriteText('[NOTE] vfsd serves MFS1 + /tmp and Ext2 RO over blockd RPC; blockd uses a bounded ATA read syscall.'#13#10);
+  WriteText(#13#10'[PASS] Phase 9 kernel foundations and userland VFS broker are prepared.'#13#10);
+  WriteText('[NOTE] Regular-file open/read/write/close syscalls use userland vfsd after PID 1 registration.'#13#10);
+  WriteText('[NOTE] vfsd serves MFS1 + /tmp and Ext2 RO over blockd RPC; directory and /dev paths remain local.'#13#10);
   WriteText('[NOTE] devd is a userland device registry; netd exposes software loopback only.'#13#10);
   WriteText('[NOTE] Single CPU; legacy PIC/PIT; raw serial TTY; no SMP yet.'#13#10);
   WriteText('[NOTE] User syscalls: process/IPC, open/read/write/close, dup2, pipe,'#13#10);

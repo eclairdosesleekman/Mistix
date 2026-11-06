@@ -175,8 +175,10 @@ var
   PID, RequestHandle, ReplyHandle, FileHandle, Count: QWord;
   Request, Response: TMistixIPCMessage;
   MotdPath: array[0..9] of Char;
-  TempPath: array[0..13] of Char;
+  TempPath: array[0..15] of Char;
   Payload: array[0..24] of Char;
+  ProxyBuffer: array[0..127] of Byte;
+  ProxyLength: QWord;
   I: LongWord;
 begin
   Result := False;
@@ -253,8 +255,8 @@ begin
 
   TempPath[0] := '/'; TempPath[1] := 't'; TempPath[2] := 'm'; TempPath[3] := 'p';
   TempPath[4] := '/'; TempPath[5] := 'p'; TempPath[6] := 'h'; TempPath[7] := 'a';
-  TempPath[8] := 's'; TempPath[9] := 'e'; TempPath[10] := '8'; TempPath[11] := '.';
-  TempPath[12] := 't'; TempPath[13] := #0;
+  TempPath[8] := 's'; TempPath[9] := 'e'; TempPath[10] := '9'; TempPath[11] := '.';
+  TempPath[12] := 't'; TempPath[13] := 'x'; TempPath[14] := 't'; TempPath[15] := #0;
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_CREATE;
   PackPath(Request, TempPath);
@@ -271,7 +273,7 @@ begin
   Payload[0] := 'M'; Payload[1] := 'i'; Payload[2] := 's'; Payload[3] := 't';
   Payload[4] := 'i'; Payload[5] := 'x'; Payload[6] := ' '; Payload[7] := 'P';
   Payload[8] := 'h'; Payload[9] := 'a'; Payload[10] := 's'; Payload[11] := 'e';
-  Payload[12] := ' '; Payload[13] := '8'; Payload[14] := #13; Payload[15] := #10;
+  Payload[12] := ' '; Payload[13] := '9'; Payload[14] := #13; Payload[15] := #10;
   for I := 0 to 15 do SharedBuffer[I] := Ord(Payload[I]);
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_WRITE;
@@ -305,6 +307,37 @@ begin
   for I := 0 to 15 do
     if SharedBuffer[I] <> Ord(Payload[I]) then Exit;
   WriteCString('[ OK ] Writable tmpfs overlay create/write/read passed.'#13#10);
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_CLOSE;
+  Request.WordCount := 1;
+  Request.Words[0] := FileHandle;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) then Exit;
+
+  { Register the same endpoint pair with the kernel. From this point onward,
+    ordinary open/read/write/close syscalls are brokered to this vfsd. }
+  if IsError(SysVFSRegister(PID, RequestHandle, ReplyHandle)) then Exit;
+  WriteCString('[ OK ] Standard file syscalls now route through userland vfsd.'#13#10);
+  FileHandle := SysOpen(PtrUInt(@MotdPath[0]), MISTIX_O_RDONLY);
+  if IsError(FileHandle) then Exit;
+  ProxyLength := SysRead(FileHandle, PtrUInt(@ProxyBuffer[0]), SizeOf(ProxyBuffer));
+  if IsError(ProxyLength) or (ProxyLength = 0) then Exit;
+  if not SysWriteAll(1, PtrUInt(@ProxyBuffer[0]), ProxyLength) then Exit;
+  if IsError(SysClose(FileHandle)) then Exit;
+  WriteCString('[ OK ] open/read/close syscall proxy round-trip passed.'#13#10);
+
+  FileHandle := SysOpen(PtrUInt(@TempPath[0]), MISTIX_O_RDWR or MISTIX_O_CREAT);
+  if IsError(FileHandle) then Exit;
+  if not SysWriteAll(FileHandle, PtrUInt(@Payload[0]), 16) then Exit;
+  if IsError(SysClose(FileHandle)) then Exit;
+  FileHandle := SysOpen(PtrUInt(@TempPath[0]), MISTIX_O_RDONLY);
+  if IsError(FileHandle) then Exit;
+  ProxyLength := SysRead(FileHandle, PtrUInt(@ProxyBuffer[0]), 16);
+  if IsError(ProxyLength) or (ProxyLength <> 16) then Exit;
+  for I := 0 to 15 do
+    if ProxyBuffer[I] <> Ord(Payload[I]) then Exit;
+  if IsError(SysClose(FileHandle)) then Exit;
+  WriteCString('[ OK ] standard syscall O_CREAT/write/read/close proxy round-trip passed.'#13#10);
   Result := True;
 end;
 
@@ -440,7 +473,7 @@ procedure MistixInitMain; cdecl; public name 'mistix_user_main';
 var
   PID, Status: QWord;
 begin
-  WriteCString(#13#10'Mistix Phase 8: ATA block service / userland Ext2 / VFS mount'#13#10);
+  WriteCString(#13#10'Mistix Phase 9: userland VFS syscall broker'#13#10);
   if not StartBlockService then
     WriteCString('[WARN] Could not start blockd; disk and Ext2 services unavailable.'#13#10);
   if not TestBlockService then

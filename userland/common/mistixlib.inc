@@ -1,10 +1,11 @@
-{ Minimal Pascal-only syscall ABI; Phase 8 adds restricted block-service calls. }
+{ Minimal Pascal-only syscall ABI; Phase 9 retains restricted block-service calls. }
 const
   MISTIX_ERRNO_BASE = QWord($FFFFFFFFFFFFF000);
   MISTIX_EAGAIN = QWord($FFFFFFFFFFFFFFF5);
   MISTIX_O_RDONLY = 0;
   MISTIX_O_WRONLY = 1;
   MISTIX_O_RDWR = 2;
+  MISTIX_O_CREAT = $40;
   MISTIX_O_DIRECTORY = $100;
   MISTIX_SYSCALL_WRITE = 1;
   MISTIX_SYSCALL_EXIT = 2;
@@ -40,6 +41,7 @@ const
   MISTIX_SYSCALL_BLOCK_REGISTER = 28;
   MISTIX_SYSCALL_BLOCK_INFO = 29;
   MISTIX_SYSCALL_BLOCK_READ = 30;
+  MISTIX_SYSCALL_VFS_REGISTER = 31;
   MISTIX_SHM_DEFAULT_BASE = QWord($0000500000000000);
 
 type
@@ -63,25 +65,25 @@ type
     Size: QWord;
   end;
 
-function SysWrite(FD, Buffer, Count: QWord): QWord; assembler; nostackframe;
+function SysWriteRaw(FD, Buffer, Count: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_WRITE
   int $80
 end;
 
-function SysRead(FD, Buffer, Count: QWord): QWord; assembler; nostackframe;
+function SysReadRaw(FD, Buffer, Count: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_READ
   int $80
 end;
 
-function SysOpen(Path, Flags: QWord): QWord; assembler; nostackframe;
+function SysOpenRaw(Path, Flags: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_OPEN
   int $80
 end;
 
-function SysClose(FD: QWord): QWord; assembler; nostackframe;
+function SysCloseRaw(FD: QWord): QWord; assembler; nostackframe;
 asm
   mov rdi, rdi
   mov eax, MISTIX_SYSCALL_CLOSE
@@ -172,6 +174,13 @@ asm
   int $80
 end;
 
+function SysVFSRegister(ServerPID, RequestHandle, ReplyHandle: QWord): QWord;
+  assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_VFS_REGISTER
+  int $80
+end;
+
 function SysShmCreate(PageCount: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_SHM_CREATE
@@ -214,6 +223,58 @@ asm
   int $80
 end;
 
+function SysWrite(FD, Buffer, Count: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysWriteRaw(FD, Buffer, Count);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
+
+function SysRead(FD, Buffer, Count: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysReadRaw(FD, Buffer, Count);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
+
+function SysOpen(Path, Flags: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysOpenRaw(Path, Flags);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
+
+function SysClose(FD: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysCloseRaw(FD);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
+
 procedure SysExit(Code: QWord); assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_EXIT
@@ -236,15 +297,7 @@ begin
   while Offset < Count do
   begin
     Written := SysWrite(FD, Buffer + Offset, Count - Offset);
-    if IsError(Written) then
-    begin
-      if Written = MISTIX_EAGAIN then
-      begin
-        SysYield;
-        Continue;
-      end;
-      Exit;
-    end;
+    if IsError(Written) then Exit;
     if Written = 0 then Exit;
     Inc(Offset, Written);
   end;

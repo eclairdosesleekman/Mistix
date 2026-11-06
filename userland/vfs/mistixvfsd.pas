@@ -26,9 +26,19 @@ const
   VFS_RPC_UNLINK = $4D56534600000008;
   VFS_RPC_MOUNT_EXT2 = $4D56534600000009;
   VFS_RPC_READDIR = $4D5653460000000A;
+  VFS_RPC_BROKER_OPEN = $4D56534600000011;
+  VFS_RPC_BROKER_READ = $4D56534600000012;
+  VFS_RPC_BROKER_WRITE = $4D56534600000013;
+  VFS_RPC_BROKER_CLOSE = $4D56534600000014;
+  VFS_O_RDONLY = 0;
+  VFS_O_WRONLY = 1;
+  VFS_O_RDWR = 2;
+  VFS_O_CREAT = $40;
   VFS_OPEN_MAX = 8;
   VFS_RPC_PATH_BYTES = 40;
+  VFS_BROKER_PATH_BYTES = 128;
   VFS_RPC_READ_MAX = 65536;
+  VFS_RPC_IO_MAX = 4096;
   VFS_TEMP_MAX = 8;
   VFS_TEMP_FILE_MAX = 4096;
   VFS_SHARED_BASE = MISTIX_SHM_DEFAULT_BASE;
@@ -59,6 +69,7 @@ type
     DataOffset: QWord;
     DataSize: QWord;
     Position: QWord;
+    Flags: LongWord;
   end;
 
   TTempFile = record
@@ -229,7 +240,7 @@ begin
 end;
 
 function AllocateOpen(DataOffset, DataSize: QWord; SourceKind: Byte;
-  TempIndex: SmallInt): QWord;
+  TempIndex: SmallInt; Flags: LongWord): QWord;
 var
   I: LongWord;
 begin
@@ -245,6 +256,7 @@ begin
       OpenSlots[I].DataOffset := DataOffset;
       OpenSlots[I].DataSize := DataSize;
       OpenSlots[I].Position := 0;
+      OpenSlots[I].Flags := Flags;
       Result := (QWord(OpenSlots[I].Generation) shl 16) or (I + 1);
       Exit;
     end;
@@ -330,6 +342,245 @@ begin
             (OpenSlots[Slot].Generation = Generation);
 end;
 
+
+function CopySharedBrokerPath(var Path: array of Char): Boolean;
+var
+  I: LongWord;
+begin
+  Result := False;
+  if (SharedBuffer = nil) or (Length(Path) < VFS_BROKER_PATH_BYTES) then Exit;
+  for I := 0 to High(Path) do Path[I] := #0;
+  for I := 0 to VFS_BROKER_PATH_BYTES - 1 do
+  begin
+    Path[I] := Char(SharedBuffer[I]);
+    if SharedBuffer[I] = 0 then
+    begin
+      Result := Path[0] = '/';
+      Exit;
+    end;
+  end;
+end;
+
+procedure DispatchBrokerRequest(const Request: TMistixIPCMessage;
+  var Response: TMistixIPCMessage);
+var
+  Path: array[0..VFS_BROKER_PATH_BYTES - 1] of Char;
+  ValidPath: Boolean;
+  DataOffset, DataSize, Requested, Available: QWord;
+  Slot, I: LongWord;
+  TempIndex: LongInt;
+  Ext2InodeNumber: LongWord;
+  Ext2Inode: TExt2UserInode;
+  Ext2BytesRead: LongWord;
+  Dest, Source: PByte;
+  Flags: LongWord;
+begin
+  ClearMessage(Response);
+  Response.MessageId := VFS_ERR_INVAL;
+  Response.WordCount := 3;
+  Response.Words[0] := Request.Words[0]; { transaction ID }
+  Response.Words[1] := Request.Words[1]; { requester PID }
+  Response.Words[2] := 0;
+  case Request.MessageId of
+    VFS_RPC_BROKER_OPEN:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not CopySharedBrokerPath(Path) then
+        begin
+          Response.MessageId := VFS_ERR_INVAL;
+          Exit;
+        end;
+        Flags := LongWord(Request.Words[2]);
+        if (Request.Words[2] > High(LongWord)) or
+           ((Flags and not LongWord(VFS_O_WRONLY or VFS_O_RDWR or VFS_O_CREAT)) <> 0) or
+           ((Flags and 3) = 3) then
+        begin
+          Response.MessageId := VFS_ERR_INVAL;
+          Exit;
+        end;
+        TempIndex := TempFind(Path);
+        if (TempIndex < 0) and ((Flags and VFS_O_CREAT) <> 0) and
+           TempPathAllowed(Path) then
+          TempIndex := TempCreate(Path);
+        Ext2InodeNumber := 0;
+        DataOffset := 0;
+        DataSize := 0;
+        if TempIndex >= 0 then
+        begin
+          DataSize := TempFiles[TempIndex].Size;
+          if ((Flags and 3) <> VFS_O_RDONLY) and not TempPathAllowed(Path) then
+          begin
+            Response.MessageId := VFS_ERR_ROFS;
+            Exit;
+          end;
+        end
+        else if Ext2UPathIsMounted(Path) then
+        begin
+          if not Ext2Mounted then
+          begin
+            Response.MessageId := QWord(-19);
+            Exit;
+          end;
+          if not Ext2ULookupPath(Path, Ext2InodeNumber, Ext2Inode) or
+             ((Ext2Inode.Mode and EXT2_U_MODE_MASK) <> EXT2_U_MODE_REGULAR) then
+          begin
+            Response.MessageId := VFS_ERR_NOENT;
+            Exit;
+          end;
+          if (Flags and 3) <> VFS_O_RDONLY then
+          begin
+            Response.MessageId := VFS_ERR_ROFS;
+            Exit;
+          end;
+          DataOffset := Ext2InodeNumber;
+          DataSize := Ext2Inode.Size;
+        end
+        else if not ArchiveFind(Path, DataOffset, DataSize) then
+        begin
+          Response.MessageId := VFS_ERR_NOENT;
+          Exit;
+        end
+        else if (Flags and 3) <> VFS_O_RDONLY then
+        begin
+          Response.MessageId := VFS_ERR_ROFS;
+          Exit;
+        end;
+        if TempIndex >= 0 then
+          Response.Words[2] := AllocateOpen(0, DataSize, 1, TempIndex, Flags)
+        else if Ext2InodeNumber <> 0 then
+          Response.Words[2] := AllocateOpen(DataOffset, DataSize, 2, -1, Flags)
+        else
+          Response.Words[2] := AllocateOpen(DataOffset, DataSize, 0, -1, Flags);
+        if IsError(Response.Words[2]) then
+          Response.MessageId := Response.Words[2]
+        else
+          Response.MessageId := 0;
+      end;
+
+    VFS_RPC_BROKER_READ:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not LookupOpen(Request.Words[2], Slot) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        if (OpenSlots[Slot].Flags and 3) = VFS_O_WRONLY then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        Requested := Request.Words[3];
+        if Requested > VFS_TEMP_FILE_MAX then Requested := VFS_TEMP_FILE_MAX;
+        if OpenSlots[Slot].Position >= OpenSlots[Slot].DataSize then
+          Available := 0
+        else
+          Available := OpenSlots[Slot].DataSize - OpenSlots[Slot].Position;
+        if Requested > Available then Requested := Available;
+        if Requested <> 0 then
+        begin
+          Dest := SharedBuffer;
+          if OpenSlots[Slot].SourceKind = 1 then
+          begin
+            TempIndex := OpenSlots[Slot].TempIndex;
+            if (TempIndex < 0) or (TempIndex >= VFS_TEMP_MAX) or
+               (TempFiles[TempIndex].Active = 0) then
+            begin
+              Response.MessageId := VFS_ERR_BADF;
+              Exit;
+            end;
+            Source := @TempFiles[TempIndex].Data[OpenSlots[Slot].Position];
+            for I := 0 to LongWord(Requested) - 1 do Dest[I] := Source[I];
+          end
+          else if OpenSlots[Slot].SourceKind = 2 then
+          begin
+            if not Ext2UReadFile(LongWord(OpenSlots[Slot].DataOffset),
+                 OpenSlots[Slot].Position, @Ext2FileScratch[0],
+                 LongWord(Requested), Ext2BytesRead) then
+            begin
+              Response.MessageId := VFS_ERR_IO;
+              Exit;
+            end;
+            Requested := Ext2BytesRead;
+            for I := 0 to LongWord(Requested) - 1 do
+              SharedBuffer[I] := Ext2FileScratch[I];
+          end
+          else
+            for I := 0 to LongWord(Requested) - 1 do
+              Dest[I] := ByteAt(ImageBase,
+                OpenSlots[Slot].DataOffset + OpenSlots[Slot].Position + I);
+        end;
+        Inc(OpenSlots[Slot].Position, Requested);
+        Response.MessageId := 0;
+        Response.Words[2] := Requested;
+      end;
+
+    VFS_RPC_BROKER_WRITE:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not LookupOpen(Request.Words[2], Slot) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        if (OpenSlots[Slot].Flags and 3) = VFS_O_RDONLY then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        if OpenSlots[Slot].SourceKind <> 1 then
+        begin
+          Response.MessageId := VFS_ERR_ROFS;
+          Exit;
+        end;
+        TempIndex := OpenSlots[Slot].TempIndex;
+        if (TempIndex < 0) or (TempIndex >= VFS_TEMP_MAX) or
+           (TempFiles[TempIndex].Active = 0) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        Requested := Request.Words[3];
+        if Requested > VFS_RPC_IO_MAX then Requested := VFS_RPC_IO_MAX;
+        if (OpenSlots[Slot].Position > VFS_TEMP_FILE_MAX) or
+           (Requested > VFS_TEMP_FILE_MAX - OpenSlots[Slot].Position) then
+        begin
+          Response.MessageId := VFS_ERR_NOSPC;
+          Exit;
+        end;
+        Source := SharedBuffer;
+        Dest := @TempFiles[TempIndex].Data[OpenSlots[Slot].Position];
+        if Requested <> 0 then
+          for I := 0 to LongWord(Requested) - 1 do Dest[I] := Source[I];
+        Inc(OpenSlots[Slot].Position, Requested);
+        if OpenSlots[Slot].Position > TempFiles[TempIndex].Size then
+          TempFiles[TempIndex].Size := OpenSlots[Slot].Position;
+        OpenSlots[Slot].DataSize := TempFiles[TempIndex].Size;
+        Response.MessageId := 0;
+        Response.Words[2] := Requested;
+      end;
+
+    VFS_RPC_BROKER_CLOSE:
+      begin
+        if Request.WordCount < 3 then Exit;
+        if not LookupOpen(Request.Words[2], Slot) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        OpenSlots[Slot].Active := 0;
+        OpenSlots[Slot].DataOffset := 0;
+        OpenSlots[Slot].DataSize := 0;
+        OpenSlots[Slot].Position := 0;
+        OpenSlots[Slot].TempIndex := -1;
+        OpenSlots[Slot].Flags := 0;
+        Response.MessageId := 0;
+      end;
+  else
+    Response.MessageId := VFS_ERR_PROTO;
+  end;
+end;
+
 procedure DispatchRequest(const Request: TMistixIPCMessage;
   var Response: TMistixIPCMessage);
 var
@@ -345,6 +596,12 @@ var
   Ext2BytesRead: LongWord;
   DirectoryEntryCount: LongWord;
 begin
+  if (Request.MessageId >= VFS_RPC_BROKER_OPEN) and
+     (Request.MessageId <= VFS_RPC_BROKER_CLOSE) then
+  begin
+    DispatchBrokerRequest(Request, Response);
+    Exit;
+  end;
   ClearMessage(Response);
   Response.MessageId := VFS_ERR_INVAL;
   case Request.MessageId of
@@ -438,11 +695,11 @@ begin
         else
         begin
           if TempIndex >= 0 then
-            Response.Words[0] := AllocateOpen(0, DataSize, 1, TempIndex)
+            Response.Words[0] := AllocateOpen(0, DataSize, 1, TempIndex, VFS_O_RDWR)
           else if Ext2InodeNumber <> 0 then
-            Response.Words[0] := AllocateOpen(DataOffset, DataSize, 2, -1)
+            Response.Words[0] := AllocateOpen(DataOffset, DataSize, 2, -1, VFS_O_RDONLY)
           else
-            Response.Words[0] := AllocateOpen(DataOffset, DataSize, 0, -1);
+            Response.Words[0] := AllocateOpen(DataOffset, DataSize, 0, -1, VFS_O_RDONLY);
           if IsError(Response.Words[0]) then
             Response.MessageId := Response.Words[0];
         end;

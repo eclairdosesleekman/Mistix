@@ -29,7 +29,7 @@ VFS_BASE_BLOB_OBJ := $(USER_BUILD_DIR)/vfs_base_blob.o
 INITFS_IMG := $(BUILD_DIR)/initfs.img
 INITFS_BLOB_OBJ := $(BUILD_DIR)/initfs_blob.o
 USER_BLOB_OBJ := $(BUILD_DIR)/user_init_blob.o
-ISO_IMAGE := $(BUILD_DIR)/mistix-phase8.iso
+ISO_IMAGE := $(BUILD_DIR)/mistix-phase9.iso
 SRC_DIR := src/kernel
 
 KERNEL_SOURCES := \
@@ -140,7 +140,7 @@ $(KERNEL_ELF): $(KERNEL_OBJ) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ) linker.ld
 
 user: user-verify
 user-verify: check-source $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) $(INITFS_IMG)
-	@echo 'Mistix Phase 8 Pascal services, ATA block broker, userland Ext2 and InitFS images verified.'
+	@echo 'Mistix Phase 9 Pascal userland VFS syscall broker, remote descriptors and InitFS verified.'
 
 initfs: $(INITFS_IMG)
 kernel: check-source $(KERNEL_ELF)
@@ -150,7 +150,7 @@ verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) 
 	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_trap_dispatch$$'
 	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_user_init_elf_start$$'
 	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_initfs_img_start$$'
-	@echo 'Mistix Phase 8 ELF, ATA block broker, userland Ext2, VFS, device and network services verified.'
+	@echo 'Mistix Phase 9 ELF, proxied VFS syscalls, remote FD lifecycle, block and userland services verified.'
 
 check-tools:
 	@command -v $(FPC) >/dev/null || { echo 'Missing Free Pascal Compiler (fpc)'; exit 1; }
