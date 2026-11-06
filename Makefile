@@ -29,7 +29,7 @@ VFS_BASE_BLOB_OBJ := $(USER_BUILD_DIR)/vfs_base_blob.o
 INITFS_IMG := $(BUILD_DIR)/initfs.img
 INITFS_BLOB_OBJ := $(BUILD_DIR)/initfs_blob.o
 USER_BLOB_OBJ := $(BUILD_DIR)/user_init_blob.o
-ISO_IMAGE := $(BUILD_DIR)/mistix-phase7.iso
+ISO_IMAGE := $(BUILD_DIR)/mistix-phase8.iso
 SRC_DIR := src/kernel
 
 KERNEL_SOURCES := \
@@ -96,8 +96,8 @@ $(VFS_BASEFS_IMG): $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) tools/mkinitfs.
 $(VFS_BASE_BLOB_OBJ): $(VFS_BASEFS_IMG) | $(USER_BUILD_DIR)
 	cd $(BUILD_DIR) && $(LD) -r -b binary -o user/vfs_base_blob.o vfs_base.img
 
-$(VFSD_ELF): userland/vfs/mistixvfsd.pas $(COMMON_INC) userland/user.ld $(VFS_BASE_BLOB_OBJ) | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/vfs/mistixvfsd.pas
+$(VFSD_ELF): userland/vfs/mistixvfsd.pas $(COMMON_INC) userland/vfs/mistix_ext2_types.inc userland/vfs/mistix_ext2_client.inc userland/user.ld $(VFS_BASE_BLOB_OBJ) | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common -Fi../../userland/vfs ../../userland/vfs/mistixvfsd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixvfsd.o $(VFS_BASE_BLOB_OBJ)
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
@@ -140,7 +140,7 @@ $(KERNEL_ELF): $(KERNEL_OBJ) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ) linker.ld
 
 user: user-verify
 user-verify: check-source $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) $(INITFS_IMG)
-	@echo 'Mistix Phase 7 Pascal services, shared-memory ABI and InitFS images verified.'
+	@echo 'Mistix Phase 8 Pascal services, ATA block broker, userland Ext2 and InitFS images verified.'
 
 initfs: $(INITFS_IMG)
 kernel: check-source $(KERNEL_ELF)
@@ -150,7 +150,7 @@ verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) 
 	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_trap_dispatch$$'
 	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_user_init_elf_start$$'
 	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_initfs_img_start$$'
-	@echo 'Mistix Phase 7 ELF, shared-memory ABI, VFS, block, device and network services verified.'
+	@echo 'Mistix Phase 8 ELF, ATA block broker, userland Ext2, VFS, device and network services verified.'
 
 check-tools:
 	@command -v $(FPC) >/dev/null || { echo 'Missing Free Pascal Compiler (fpc)'; exit 1; }

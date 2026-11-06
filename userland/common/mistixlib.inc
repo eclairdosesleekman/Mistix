@@ -1,4 +1,4 @@
-{ Minimal Pascal-only userspace syscall ABI for Mistix Phase 5. }
+{ Minimal Pascal-only syscall ABI; Phase 8 adds restricted block-service calls. }
 const
   MISTIX_ERRNO_BASE = QWord($FFFFFFFFFFFFF000);
   MISTIX_EAGAIN = QWord($FFFFFFFFFFFFFFF5);
@@ -37,6 +37,9 @@ const
   MISTIX_SYSCALL_SHM_CREATE = 25;
   MISTIX_SYSCALL_SHM_MAP = 26;
   MISTIX_SYSCALL_SHM_UNMAP = 27;
+  MISTIX_SYSCALL_BLOCK_REGISTER = 28;
+  MISTIX_SYSCALL_BLOCK_INFO = 29;
+  MISTIX_SYSCALL_BLOCK_READ = 30;
   MISTIX_SHM_DEFAULT_BASE = QWord($0000500000000000);
 
 type
@@ -45,6 +48,12 @@ type
     WordCount: Byte;
     Reserved: array[0..6] of Byte;
     Words: array[0..5] of QWord;
+  end;
+
+  TMistixBlockDeviceInfo = packed record
+    SectorCount: QWord;
+    SectorSize: LongWord;
+    Flags: LongWord;
   end;
 
   TMistixDirent = packed record
@@ -172,6 +181,24 @@ end;
 function SysShmMap(Handle, BaseAddress, Writable: QWord): QWord; assembler; nostackframe;
 asm
   mov eax, MISTIX_SYSCALL_SHM_MAP
+  int $80
+end;
+
+function SysBlockRegister: QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_BLOCK_REGISTER
+  int $80
+end;
+
+function SysBlockInfo(InfoAddress: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_BLOCK_INFO
+  int $80
+end;
+
+function SysBlockRead(LBA, SectorCount, BufferAddress: QWord): QWord; assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_BLOCK_READ
   int $80
 end;
 

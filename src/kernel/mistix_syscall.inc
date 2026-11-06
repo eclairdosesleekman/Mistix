@@ -1,4 +1,4 @@
-{ Mistix Phase 5 syscall ABI. RAX=number/result, args in RDI/RSI/RDX. }
+{ Mistix syscall ABI. Phase 8 adds the restricted blockd read-only interface. }
 
 const
   MISTIX_SYSCALL_WRITE = 1;
@@ -28,6 +28,9 @@ const
   MISTIX_SYSCALL_SHM_CREATE = 25;
   MISTIX_SYSCALL_SHM_MAP = 26;
   MISTIX_SYSCALL_SHM_UNMAP = 27;
+  MISTIX_SYSCALL_BLOCK_REGISTER = 28;
+  MISTIX_SYSCALL_BLOCK_INFO = 29;
+  MISTIX_SYSCALL_BLOCK_READ = 30;
 
   MISTIX_SYSCALL_MAX_WRITE = 4096;
   MISTIX_ERR_BADF = $FFFFFFFFFFFFFFF7;
@@ -36,6 +39,83 @@ const
   MISTIX_ERR_NOSYS = $FFFFFFFFFFFFFFDA;
   MISTIX_ERR_NOMEM = $FFFFFFFFFFFFFFF4;
   MISTIX_ERR_BUSY = $FFFFFFFFFFFFFFF0;
+
+type
+  TMistixBlockUserInfo = packed record
+    SectorCount: QWord;
+    SectorSize: LongWord;
+    Flags: LongWord;
+  end;
+
+var
+  BlockSyscallScratch: array[0..65535] of Byte;
+
+function SyscallBlockRegisterCurrent: QWord;
+begin
+  Result := QWord(-1); { -EPERM }
+  if CurrentProcessIndex >= PROCESS_MAX_COUNT then Exit;
+  if ProcessTable[CurrentProcessIndex].State <> psRunning then Exit;
+  { PID 1 is the init authority in this bring-up ABI. Only its direct child
+    may register as the block service. Registration is one-shot. }
+  if (ProcessTable[CurrentProcessIndex].ParentPID <> 1) or
+     (ProcessTable[CurrentProcessIndex].PID = 0) then Exit;
+  if (BlockServerPID <> 0) and
+     (BlockServerPID <> ProcessTable[CurrentProcessIndex].PID) then Exit;
+  BlockServerPID := ProcessTable[CurrentProcessIndex].PID;
+  Result := 0;
+end;
+
+function SyscallBlockInfo(Process: PKernelProcess; UserInfoAddress: QWord): QWord;
+var
+  Info: TMistixBlockUserInfo;
+begin
+  Result := QWord(-1); { -EPERM }
+  if (Process = nil) or (Process^.PID = 0) or
+     (Process^.PID <> BlockServerPID) then Exit;
+  Result := QWord(-19); { -ENODEV }
+  if not BlockInitialized or (BlockDevices[0].Active = 0) then Exit;
+  Info.SectorCount := BlockDevices[0].SectorCount;
+  Info.SectorSize := BLOCK_SECTOR_SIZE;
+  Info.Flags := 1; { physical ATA PIO device }
+  Result := QWord(-14); { -EFAULT }
+  if not AddressSpaceCopyTo(Process^.AddressSpaceRoot, UserInfoAddress,
+       @Info, SizeOf(Info)) then Exit;
+  Result := 0;
+end;
+
+function SyscallBlockRead(Process: PKernelProcess; LBA, SectorCount,
+  UserBuffer: QWord): QWord;
+var
+  ByteCount: QWord;
+begin
+  Result := QWord(-1); { -EPERM }
+  if (Process = nil) or (Process^.PID = 0) or
+     (Process^.PID <> BlockServerPID) then Exit;
+  Result := QWord(-19); { -ENODEV }
+  if not BlockInitialized or (BlockDevices[0].Active = 0) then Exit;
+  Result := QWord(-22); { -EINVAL }
+  if (SectorCount = 0) or (SectorCount > 128) then Exit;
+  if (LBA > BlockDevices[0].SectorCount) or
+     (SectorCount > BlockDevices[0].SectorCount - LBA) then
+  begin
+    Result := QWord(-34); { -ERANGE }
+    Exit;
+  end;
+  ByteCount := SectorCount * BLOCK_SECTOR_SIZE;
+  Result := QWord(-14); { -EFAULT }
+  if not AddressSpaceValidateUserRange(Process^.AddressSpaceRoot,
+       UserBuffer, ByteCount) then Exit;
+  Result := QWord(-5); { -EIO }
+  if not BlockReadSectors(0, LBA, LongWord(SectorCount),
+       @BlockSyscallScratch[0]) then Exit;
+  if not AddressSpaceCopyTo(Process^.AddressSpaceRoot, UserBuffer,
+       @BlockSyscallScratch[0], ByteCount) then
+  begin
+    Result := QWord(-14);
+    Exit;
+  end;
+  Result := ByteCount;
+end;
 
 procedure SyscallISR; assembler; nostackframe; public name 'mistix_syscall_isr';
 asm
@@ -240,6 +320,16 @@ begin
     MISTIX_SYSCALL_SHM_UNMAP:
       ReturnValue := P7ShmUnmap(CurrentProcessIndex, Frame^.SavedRDI,
         Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_BLOCK_REGISTER:
+      ReturnValue := SyscallBlockRegisterCurrent;
+
+    MISTIX_SYSCALL_BLOCK_INFO:
+      ReturnValue := SyscallBlockInfo(Process, Frame^.SavedRDI);
+
+    MISTIX_SYSCALL_BLOCK_READ:
+      ReturnValue := SyscallBlockRead(Process, Frame^.SavedRDI,
+        Frame^.SavedRSI, Frame^.SavedRDX);
   end;
 
   Frame^.SavedRAX := ReturnValue;

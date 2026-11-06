@@ -58,6 +58,7 @@ var
   BlockPartitions: array[0..BLOCK_PARTITION_MAX - 1] of TBlockPartition;
   BlockBusy: Byte;
   BlockInitialized: Boolean;
+  BlockServerPID: QWord; { only the registered blockd may use raw read syscalls }
   BlockSectorScratch: array[0..BLOCK_SECTOR_SIZE - 1] of Byte;
 
 function ATAReadDataWord(Port: Word): Word; cdecl; assembler; nostackframe;
@@ -275,6 +276,7 @@ var
   Partitions: LongWord;
 begin
   BlockBusy := 0;
+  BlockServerPID := 0;
   BlockInitialized := False;
   for I := 0 to BLOCK_DEVICE_MAX - 1 do
   begin

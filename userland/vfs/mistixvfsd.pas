@@ -24,6 +24,8 @@ const
   VFS_RPC_CREATE = $4D56534600000006;
   VFS_RPC_WRITE = $4D56534600000007;
   VFS_RPC_UNLINK = $4D56534600000008;
+  VFS_RPC_MOUNT_EXT2 = $4D56534600000009;
+  VFS_RPC_READDIR = $4D5653460000000A;
   VFS_OPEN_MAX = 8;
   VFS_RPC_PATH_BYTES = 40;
   VFS_RPC_READ_MAX = 65536;
@@ -32,6 +34,8 @@ const
   VFS_SHARED_BASE = MISTIX_SHM_DEFAULT_BASE;
   VFS_ERR_NOENT = QWord(-2);
   VFS_ERR_BADF = QWord(-9);
+  VFS_ERR_IO = QWord(-5);
+  VFS_ERR_NOTDIR = QWord(-20);
   VFS_ERR_INVAL = QWord(-22);
   VFS_ERR_NOSPC = QWord(-28);
   VFS_ERR_ROFS = QWord(-30);
@@ -50,7 +54,7 @@ type
   TVFSOpenSlot = record
     Active: Byte;
     Generation: Word;
-    SourceKind: Byte; { 0=MFS1 archive, 1=tmpfs }
+    SourceKind: Byte; { 0=MFS1, 1=tmpfs, 2=read-only Ext2 }
     TempIndex: SmallInt;
     DataOffset: QWord;
     DataSize: QWord;
@@ -74,6 +78,8 @@ var
   ImageSize: QWord;
   SharedBuffer: PByte;
   TempFiles: array[0..VFS_TEMP_MAX - 1] of TTempFile;
+
+{$I mistix_ext2_types.inc}
 
 function ByteAt(Base: Pointer; Offset: QWord): Byte; inline;
 begin
@@ -277,6 +283,8 @@ begin
     (Path[5] <> #0);
 end;
 
+{$I mistix_ext2_client.inc}
+
 function TempCreate(const Path: array of Char): LongInt;
 var
   I, J, L: LongWord;
@@ -332,17 +340,62 @@ var
   I: LongWord;
   Dest, Source: PByte;
   TempIndex: LongInt;
+  Ext2InodeNumber: LongWord;
+  Ext2Inode: TExt2UserInode;
+  Ext2BytesRead: LongWord;
+  DirectoryEntryCount: LongWord;
 begin
   ClearMessage(Response);
   Response.MessageId := VFS_ERR_INVAL;
   case Request.MessageId of
+    VFS_RPC_MOUNT_EXT2:
+      begin
+        if Ext2UMount then
+        begin
+          Response.MessageId := 0;
+          Response.WordCount := 3;
+          Response.Words[0] := Ext2BlockSize;
+          Response.Words[1] := Ext2BlocksCount;
+          Response.Words[2] := Ext2InodesCount;
+        end
+        else if Ext2DiskBytes = 0 then
+          Response.MessageId := QWord(-19)
+        else
+          Response.MessageId := QWord(-22);
+      end;
+
     VFS_RPC_PING:
       begin
         Response.MessageId := 0;
         Response.WordCount := 3;
-        Response.Words[0] := 2; { RPC protocol version }
+        Response.Words[0] := 3; { RPC protocol version }
         Response.Words[1] := ReadLE32(ImageBase, 8);
         Response.Words[2] := VFS_TEMP_MAX;
+      end;
+
+    VFS_RPC_READDIR:
+      begin
+        if Request.WordCount < 5 then Exit;
+        CopyRequestPath(Request, Path, ValidPath);
+        if not ValidPath then Exit;
+        if not Ext2UPathIsMounted(Path) then
+        begin
+          Response.MessageId := VFS_ERR_NOENT;
+          Exit;
+        end;
+        if not Ext2Mounted then
+        begin
+          Response.MessageId := QWord(-19);
+          Exit;
+        end;
+        if not Ext2UReadDirectory(Path, DirectoryEntryCount) then
+        begin
+          Response.MessageId := VFS_ERR_NOTDIR;
+          Exit;
+        end;
+        Response.MessageId := 0;
+        Response.WordCount := 1;
+        Response.Words[0] := DirectoryEntryCount;
       end;
 
     VFS_RPC_OPEN, VFS_RPC_STAT:
@@ -351,10 +404,27 @@ begin
         CopyRequestPath(Request, Path, ValidPath);
         if not ValidPath then Exit;
         TempIndex := TempFind(Path);
+        Ext2InodeNumber := 0;
         if TempIndex >= 0 then
         begin
           DataOffset := 0;
           DataSize := TempFiles[TempIndex].Size;
+        end
+        else if Ext2UPathIsMounted(Path) then
+        begin
+          if not Ext2Mounted then
+          begin
+            Response.MessageId := QWord(-19); { -ENODEV: not mounted }
+            Exit;
+          end;
+          if not Ext2ULookupPath(Path, Ext2InodeNumber, Ext2Inode) or
+             ((Ext2Inode.Mode and EXT2_U_MODE_MASK) <> EXT2_U_MODE_REGULAR) then
+          begin
+            Response.MessageId := VFS_ERR_NOENT;
+            Exit;
+          end;
+          DataOffset := Ext2InodeNumber;
+          DataSize := Ext2Inode.Size;
         end
         else if not ArchiveFind(Path, DataOffset, DataSize) then
         begin
@@ -369,6 +439,8 @@ begin
         begin
           if TempIndex >= 0 then
             Response.Words[0] := AllocateOpen(0, DataSize, 1, TempIndex)
+          else if Ext2InodeNumber <> 0 then
+            Response.Words[0] := AllocateOpen(DataOffset, DataSize, 2, -1)
           else
             Response.Words[0] := AllocateOpen(DataOffset, DataSize, 0, -1);
           if IsError(Response.Words[0]) then
@@ -426,6 +498,19 @@ begin
             end;
             Source := @TempFiles[TempIndex].Data[OpenSlots[Slot].Position];
             for I := 0 to LongWord(Requested) - 1 do Dest[I] := Source[I];
+          end
+          else if OpenSlots[Slot].SourceKind = 2 then
+          begin
+            if not Ext2UReadFile(LongWord(OpenSlots[Slot].DataOffset),
+                 OpenSlots[Slot].Position, @Ext2FileScratch[0],
+                 LongWord(Requested), Ext2BytesRead) then
+            begin
+              Response.MessageId := VFS_ERR_IO;
+              Exit;
+            end;
+            Requested := Ext2BytesRead;
+            for I := 0 to LongWord(Requested) - 1 do
+              SharedBuffer[I] := Ext2FileScratch[I];
           end
           else
             for I := 0 to LongWord(Requested) - 1 do
@@ -539,13 +624,18 @@ end;
 function ReceiveCapabilities: Boolean;
 var
   FirstHandle, SecondHandle, SharedHandle: QWord;
+  BlockSendHandle, BlockReceiveHandle: QWord;
 begin
   Result := False;
   if not ReceiveOneCapability(FirstHandle) then Exit;
   if not ReceiveOneCapability(SecondHandle) then Exit;
   if not ReceiveOneCapability(SharedHandle) then Exit;
+  if not ReceiveOneCapability(BlockSendHandle) then Exit;
+  if not ReceiveOneCapability(BlockReceiveHandle) then Exit;
   RequestEndpoint := FirstHandle;
   ReplyEndpoint := SecondHandle;
+  BlockRequestEndpoint := BlockSendHandle;
+  BlockReplyEndpoint := BlockReceiveHandle;
   if IsError(SysShmMap(SharedHandle, VFS_SHARED_BASE, 1)) then Exit;
   SharedBuffer := PByte(PtrUInt(VFS_SHARED_BASE));
   Result := True;
@@ -568,7 +658,8 @@ begin
     WriteCString('vfsd: missing IPC capabilities'#13#10);
     SysExit(11);
   end;
-  WriteCString('vfsd: userland VFS online (MFS1 base + writable /tmp overlay)'#13#10);
+  Ext2Mounted := False;
+  WriteCString('vfsd: userland VFS online (MFS1 + /tmp + Ext2 read-only mount over blockd RPC)'#13#10);
   while True do
   begin
     Status := SysIPCReceive(RequestEndpoint, PtrUInt(@Request));

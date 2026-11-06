@@ -21,6 +21,7 @@ const
   BlockdPath: array[0..12] of Char = ('/','s','b','i','n','/','b','l','o','c','k','d',#0);
   DevdPath: array[0..10] of Char = ('/','s','b','i','n','/','d','e','v','d',#0);
   NetdPath: array[0..10] of Char = ('/','s','b','i','n','/','n','e','t','d',#0);
+  Ext2RootPath: array[0..9] of Char = ('/','m','n','t','/','d','i','s','k',#0);
   EmptyArgs: array[0..0] of Char = (#0);
 
   VFS_RPC_PING  = $4D56534600000001;
@@ -30,6 +31,7 @@ const
   VFS_RPC_CREATE = $4D56534600000006;
   VFS_RPC_WRITE = $4D56534600000007;
   VFS_RPC_UNLINK = $4D56534600000008;
+  VFS_RPC_MOUNT_EXT2 = $4D56534600000009;
   BLOCK_RPC_INFO  = $4D424C4B00000001;
   BLOCK_RPC_READ  = $4D424C4B00000002;
   BLOCK_RPC_WRITE = $4D424C4B00000003;
@@ -44,6 +46,10 @@ var
   SharedHandle: QWord;
   SharedReady: Boolean;
   SharedBuffer: PByte;
+  BlockPID: QWord;
+  BlockRequestHandle: QWord;
+  BlockReplyHandle: QWord;
+  BlockServiceReady: Boolean;
 
 procedure ClearMessage(var Message: TMistixIPCMessage);
 var
@@ -151,6 +157,19 @@ begin
   Result := not IsError(R);
 end;
 
+function StartBlockService: Boolean;
+begin
+  Result := BlockServiceReady;
+  if Result then Exit;
+  if not EnsureSharedMemory then Exit(False);
+  if not LaunchService(BlockdPath, BlockPID, BlockRequestHandle,
+       BlockReplyHandle) then Exit(False);
+  if not ShareMemoryWith(BlockPID) then Exit(False);
+  BlockServiceReady := True;
+  WriteCString('[ OK ] blockd launched with restricted ATA/RAM backend capability.'#13#10);
+  Result := True;
+end;
+
 function TestVFSService: Boolean;
 var
   PID, RequestHandle, ReplyHandle, FileHandle, Count: QWord;
@@ -171,14 +190,38 @@ begin
     Exit;
   end;
   if not ShareMemoryWith(PID) then Exit;
-  WriteCString('[ OK ] vfsd spawned with shared-memory window.'#13#10);
+  if not BlockServiceReady then Exit;
+  if IsError(SysCapabilityTransfer(PID, BlockRequestHandle, MISTIX_CAP_SEND)) then Exit;
+  if IsError(SysCapabilityTransfer(PID, BlockReplyHandle, MISTIX_CAP_RECEIVE)) then Exit;
+  WriteCString('[ OK ] vfsd received shared-memory and blockd RPC capabilities.'#13#10);
 
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_PING;
   if not RPCSend(RequestHandle, Request) or
      not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
-     (Response.Words[0] <> 2) then Exit;
-  WriteCString('[ OK ] VFS RPC v2 handshake passed.'#13#10);
+     (Response.Words[0] <> 3) then Exit;
+  WriteCString('[ OK ] VFS RPC v3 handshake passed.'#13#10);
+
+  ClearMessage(Request);
+  Request.MessageId := VFS_RPC_MOUNT_EXT2;
+  if not RPCSend(RequestHandle, Request) or
+     not RPCReceive(ReplyHandle, Response) then Exit;
+  if Response.MessageId = 0 then
+  begin
+    WriteCString('[ OK ] Ext2 mounted read-only at /mnt/disk through blockd RPC.'#13#10);
+    ClearMessage(Request);
+    Request.MessageId := VFS_RPC_READDIR;
+    PackPath(Request, Ext2RootPath);
+    if RPCSend(RequestHandle, Request) and RPCReceive(ReplyHandle, Response) and
+       (Response.MessageId = 0) then
+      WriteCString('[ OK ] Ext2 root directory enumeration returned entries.'#13#10)
+    else
+      WriteCString('[WARN] Ext2 root directory enumeration was unavailable.'#13#10);
+  end
+  else if Response.MessageId = QWord(-19) then
+    WriteCString('[INFO] No physical Ext2 disk is available; /mnt/disk remains unmounted.'#13#10)
+  else
+    WriteCString('[WARN] Disk found but Ext2 mount was rejected.'#13#10);
 
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_OPEN;
@@ -210,7 +253,7 @@ begin
 
   TempPath[0] := '/'; TempPath[1] := 't'; TempPath[2] := 'm'; TempPath[3] := 'p';
   TempPath[4] := '/'; TempPath[5] := 'p'; TempPath[6] := 'h'; TempPath[7] := 'a';
-  TempPath[8] := 's'; TempPath[9] := 'e'; TempPath[10] := '7'; TempPath[11] := '.';
+  TempPath[8] := 's'; TempPath[9] := 'e'; TempPath[10] := '8'; TempPath[11] := '.';
   TempPath[12] := 't'; TempPath[13] := #0;
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_CREATE;
@@ -228,7 +271,7 @@ begin
   Payload[0] := 'M'; Payload[1] := 'i'; Payload[2] := 's'; Payload[3] := 't';
   Payload[4] := 'i'; Payload[5] := 'x'; Payload[6] := ' '; Payload[7] := 'P';
   Payload[8] := 'h'; Payload[9] := 'a'; Payload[10] := 's'; Payload[11] := 'e';
-  Payload[12] := ' '; Payload[13] := '7'; Payload[14] := #13; Payload[15] := #10;
+  Payload[12] := ' '; Payload[13] := '8'; Payload[14] := #13; Payload[15] := #10;
   for I := 0 to 15 do SharedBuffer[I] := Ord(Payload[I]);
   ClearMessage(Request);
   Request.MessageId := VFS_RPC_WRITE;
@@ -267,53 +310,60 @@ end;
 
 function TestBlockService: Boolean;
 var
-  PID, RequestHandle, ReplyHandle: QWord;
   Request, Response: TMistixIPCMessage;
   I: LongWord;
   TestText: array[0..7] of Byte;
 begin
   Result := False;
-  if not EnsureSharedMemory then Exit;
-  TestText[0] := Ord('M'); TestText[1] := Ord('I');
-  TestText[2] := Ord('S'); TestText[3] := Ord('T');
-  TestText[4] := Ord('I'); TestText[5] := Ord('X');
-  TestText[6] := Ord('7'); TestText[7] := Ord('!');
-  if not LaunchService(BlockdPath, PID, RequestHandle, ReplyHandle) then
-  begin
-    WriteCString('[FAIL] Could not start block server.'#13#10);
-    Exit;
-  end;
-  if not ShareMemoryWith(PID) then Exit;
-  WriteCString('[ OK ] blockd spawned with shared-memory DMA window.'#13#10);
-
+  if not BlockServiceReady or not EnsureSharedMemory then Exit;
   ClearMessage(Request);
   Request.MessageId := BLOCK_RPC_INFO;
-  if not RPCSend(RequestHandle, Request) or
-     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
-     (Response.Words[1] <> 512) or (Response.Words[2] <> SHARED_BYTES) then Exit;
+  if not RPCSend(BlockRequestHandle, Request) or
+     not RPCReceive(BlockReplyHandle, Response) or (Response.MessageId <> 0) or
+     (Response.Words[1] <> 512) then Exit;
 
-  for I := 0 to High(TestText) do SharedBuffer[I] := TestText[I];
-  ClearMessage(Request);
-  Request.MessageId := BLOCK_RPC_WRITE;
-  Request.WordCount := 2;
-  Request.Words[0] := 0;
-  Request.Words[1] := SizeOf(TestText);
-  if not RPCSend(RequestHandle, Request) or
-     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
-     (Response.Words[0] <> SizeOf(TestText)) then Exit;
-
-  for I := 0 to High(TestText) do SharedBuffer[I] := 0;
-  ClearMessage(Request);
-  Request.MessageId := BLOCK_RPC_READ;
-  Request.WordCount := 2;
-  Request.Words[0] := 0;
-  Request.Words[1] := SizeOf(TestText);
-  if not RPCSend(RequestHandle, Request) or
-     not RPCReceive(ReplyHandle, Response) or (Response.MessageId <> 0) or
-     (Response.Words[0] <> SizeOf(TestText)) then Exit;
-  for I := 0 to High(TestText) do
-    if SharedBuffer[I] <> TestText[I] then Exit;
-  WriteCString('[ OK ] Shared-memory block READ/WRITE round-trip passed.'#13#10);
+  if Response.Words[3] = 1 then
+  begin
+    { Never write to an attached physical disk during a boot self-test. }
+    ClearMessage(Request);
+    Request.MessageId := BLOCK_RPC_READ;
+    Request.WordCount := 2;
+    Request.Words[0] := 0;
+    Request.Words[1] := 512;
+    if not RPCSend(BlockRequestHandle, Request) or
+       not RPCReceive(BlockReplyHandle, Response) or
+       (Response.MessageId <> 0) or (Response.Words[0] <> 512) then Exit;
+    WriteCString('[ OK ] blockd physical ATA read-only sector RPC passed.'#13#10);
+  end
+  else
+  begin
+    if Response.Words[2] <> SHARED_BYTES then Exit;
+    TestText[0] := Ord('M'); TestText[1] := Ord('I');
+    TestText[2] := Ord('S'); TestText[3] := Ord('T');
+    TestText[4] := Ord('I'); TestText[5] := Ord('X');
+    TestText[6] := Ord('8'); TestText[7] := Ord('!');
+    for I := 0 to High(TestText) do SharedBuffer[I] := TestText[I];
+    ClearMessage(Request);
+    Request.MessageId := BLOCK_RPC_WRITE;
+    Request.WordCount := 2;
+    Request.Words[0] := 0;
+    Request.Words[1] := SizeOf(TestText);
+    if not RPCSend(BlockRequestHandle, Request) or
+       not RPCReceive(BlockReplyHandle, Response) or (Response.MessageId <> 0) or
+       (Response.Words[0] <> SizeOf(TestText)) then Exit;
+    for I := 0 to High(TestText) do SharedBuffer[I] := 0;
+    ClearMessage(Request);
+    Request.MessageId := BLOCK_RPC_READ;
+    Request.WordCount := 2;
+    Request.Words[0] := 0;
+    Request.Words[1] := SizeOf(TestText);
+    if not RPCSend(BlockRequestHandle, Request) or
+       not RPCReceive(BlockReplyHandle, Response) or (Response.MessageId <> 0) or
+       (Response.Words[0] <> SizeOf(TestText)) then Exit;
+    for I := 0 to High(TestText) do
+      if SharedBuffer[I] <> TestText[I] then Exit;
+    WriteCString('[ OK ] blockd shared-memory RAM READ/WRITE round-trip passed.'#13#10);
+  end;
   Result := True;
 end;
 
@@ -390,11 +440,13 @@ procedure MistixInitMain; cdecl; public name 'mistix_user_main';
 var
   PID, Status: QWord;
 begin
-  WriteCString(#13#10'Mistix Phase 7: shared-memory services / VFS overlay / loopback network'#13#10);
+  WriteCString(#13#10'Mistix Phase 8: ATA block service / userland Ext2 / VFS mount'#13#10);
+  if not StartBlockService then
+    WriteCString('[WARN] Could not start blockd; disk and Ext2 services unavailable.'#13#10);
+  if not TestBlockService then
+    WriteCString('[WARN] Block service test did not complete.'#13#10);
   if not TestVFSService then
     WriteCString('[WARN] VFS service RPC test did not complete.'#13#10);
-  if not TestBlockService then
-    WriteCString('[WARN] Block service RPC test did not complete.'#13#10);
   if not TestDeviceManager then
     WriteCString('[WARN] Device-manager RPC test did not complete.'#13#10);
   if not TestNetworkService then

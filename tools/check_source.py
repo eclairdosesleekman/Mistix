@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural checks for Mistix Phase 7. This is not an FPC compiler."""
+"""Structural checks for Mistix Phase 8; this is not an FPC compiler."""
 from __future__ import annotations
 import re
 import sys
@@ -31,20 +31,23 @@ def require(path: Path, tokens: tuple[str, ...]) -> str:
 def main() -> int:
     kernel_unit = require(ROOT / "src/kernel/mistixkernel.pas", (
         "mistix_block.inc", "mistix_ext2.inc", "mistix_mount.inc",
-        "mistix_net.inc", "mistix_vfs.inc", "mistix_shm.inc", "mistix_syscall.inc",
+        "mistix_net.inc", "mistix_vfs.inc", "mistix_shm.inc",
+        "mistix_syscall.inc", "mistix_main.inc",
     ))
     includes = re.findall(r"\{\$I\s+([^}]+)\}", kernel_unit, flags=re.I)
     for include in includes:
         if not (KERNEL / include.strip()).is_file():
             fail(f"Missing kernel include: {include}")
+
     order = [
         "mistix_types.inc", "mistix_console.inc", "mistix_cpu.inc",
         "mistix_memory.inc", "mistix_threads.inc", "mistix_capability.inc",
         "mistix_ipc.inc", "mistix_notification.inc", "mistix_memory_object.inc",
         "mistix_address_space.inc", "mistix_cow.inc", "mistix_block.inc",
         "mistix_ext2.inc", "mistix_mount.inc", "mistix_net.inc",
-        "mistix_vfs.inc", "mistix_process.inc", "mistix_shm.inc", "mistix_syscall.inc",
-        "mistix_timer.inc", "mistix_trap.inc", "mistix_main.inc",
+        "mistix_vfs.inc", "mistix_process.inc", "mistix_shm.inc",
+        "mistix_syscall.inc", "mistix_timer.inc", "mistix_trap.inc",
+        "mistix_main.inc",
     ]
     for name in order:
         if name not in includes:
@@ -61,7 +64,7 @@ def main() -> int:
         "MountRegisterExt2", "MountFindLongestPrefix", "NetParseEthernetFrame",
         "NetIPv4Checksum", "VFSInitialize", "ProcessSpawnFromPath",
         "SyscallDispatchFrame", "TrapDispatch", "P7ShmCreate", "P7ShmMap",
-        "P7ShmUnmap", "P7ShmReleaseProcess", "okMemoryObject",
+        "P7ShmUnmap", "P7ShmReleaseProcess", "P7ShmProcessHasMappings",
     ):
         if not re.search(rf"\b{re.escape(token)}\b", kernel_text):
             fail(f"Kernel is missing {token}")
@@ -69,8 +72,21 @@ def main() -> int:
     block = require(KERNEL / "mistix_block.inc", (
         "ATA_CMD_IDENTIFY", "ATA_CMD_READ_SECTORS", "ATA_CMD_WRITE_SECTORS",
         "LBA28", "BlockScanMBR", "BLOCK_SECTOR_SIZE = 512",
+        "BlockServerPID", "BlockServerPID := 0",
     ))
-    ext2 = require(KERNEL / "mistix_ext2.inc", (
+    syscall = require(KERNEL / "mistix_syscall.inc", (
+        "MISTIX_SYSCALL_BLOCK_REGISTER = 28",
+        "MISTIX_SYSCALL_BLOCK_INFO = 29",
+        "MISTIX_SYSCALL_BLOCK_READ = 30",
+        "SyscallBlockRegisterCurrent", "SyscallBlockInfo", "SyscallBlockRead",
+        "ProcessTable[CurrentProcessIndex].ParentPID <> 1",
+        "SectorCount > 128", "AddressSpaceValidateUserRange",
+        "MISTIX_SYSCALL_BLOCK_READ:",
+    ))
+    if "MISTIX_SYSCALL_BLOCK_WRITE" in syscall:
+        fail("Raw physical block write syscall must remain absent in Phase 8")
+
+    ext2_kernel = require(KERNEL / "mistix_ext2.inc", (
         "EXT2_MAGIC = $EF53", "EXT2_FEATURE_INCOMPAT_FILETYPE",
         "Ext2Mount", "Ext2ReadFile", "LogicalBlock >= 12",
         "EXT2_FEATURE_COMPAT_HAS_JOURNAL",
@@ -89,68 +105,63 @@ def main() -> int:
         "TMistixIPCMessage", "SysEndpointCreate", "SysIPCSend",
         "SysIPCReceive", "SysCapabilityTransfer", "SysCapabilityReceive",
         "SysCapabilityClose", "SysSpawnPath", "SysWriteAll",
-        "SysShmCreate", "SysShmMap", "SysShmUnmap", "MISTIX_SYSCALL_SHM_CREATE",
+        "SysShmCreate", "SysShmMap", "SysShmUnmap",
+        "MISTIX_SYSCALL_SHM_CREATE", "MISTIX_SYSCALL_BLOCK_REGISTER",
+        "MISTIX_SYSCALL_BLOCK_INFO", "MISTIX_SYSCALL_BLOCK_READ",
+        "SysBlockRegister", "SysBlockInfo", "SysBlockRead",
     ))
     if "Reserved: array[0..6] of Byte" not in lib or "Words: array[0..5] of QWord" not in lib:
         fail("Userland IPC message ABI does not match the kernel TIPCMessage")
+    if "SectorCount: QWord" not in lib or "SectorSize: LongWord" not in lib:
+        fail("Block info ABI layout is missing")
 
-    init_rpc = require(ROOT / "userland/init/mistixinit.pas", (
-        "if R <> MISTIX_EAGAIN then Exit", "SysCapabilityTransfer",
+    blockd = require(ROOT / "userland/block/mistixblockd.pas", (
+        "SysBlockRegister", "SysBlockInfo", "SysBlockRead",
+        "HardwareReadBytes", "BLOCK_RPC_INFO", "BLOCK_RPC_READ",
+        "BLOCK_RPC_WRITE", "BLOCK_ERR_ROFS", "RAMDisk",
+        "BatchSectors > 128", "HardwareScratch",
     ))
-    vfs_retry = require(ROOT / "userland/vfs/mistixvfsd.pas", (
-        "if Status = MISTIX_EAGAIN then SysYield",
-        "else if IsError(Status) then SysExit(12)",
-        "if Request.WordCount < 2 then Exit",
+    hardware_write = re.search(r"BLOCK_RPC_WRITE:\s*begin(?P<body>.*?)\n\s*end;", blockd, re.S)
+    if not hardware_write or "BLOCK_ERR_ROFS" not in hardware_write.group("body"):
+        fail("Physical ATA writes must be rejected with EROFS")
+
+    ext2_types = require(ROOT / "userland/vfs/mistix_ext2_types.inc", (
+        "TExt2UserInode", "Ext2DiskBytes", "Ext2DirEntries",
+        "BlockRequestEndpoint", "BlockReplyEndpoint",
     ))
-    block_retry = require(ROOT / "userland/block/mistixblockd.pas", (
-        "if Status = MISTIX_EAGAIN then SysYield",
-        "else if IsError(Status) then SysExit(12)",
-        "if Request.WordCount < 2 then Exit",
+    ext2_client = require(ROOT / "userland/vfs/mistix_ext2_client.inc", (
+        "Ext2UBlockRPCInfo", "Ext2UBlockRPCRead", "Ext2UMount",
+        "EXT2_U_MAGIC", "EXT2_U_FEATURE_COMPAT_HAS_JOURNAL",
+        "EXT2_U_FEATURE_INCOMPAT_FILETYPE", "EXT2_U_FEATURE_COMPAT_DIR_INDEX",
+        "RootInode", "Ext2UReadInode(InodeNumber: LongWord; out Inode: TExt2UserInode): Boolean; forward;",
+        "Ext2UResolveBlock", "Inode.Blocks[12]", "Ext2ULookupPath",
+        "Ext2UReadDirectory", "Ext2UReadFile", "Ext2UPathIsMounted",
+        "LogicalBlocks = 0", "NameLength > 63",
     ))
+    if "Status := SysIPCReceive(BlockReplyEndpoint" not in ext2_client:
+        fail("Ext2 client must receive blockd replies over IPC")
+    if "SysYield" not in ext2_client:
+        fail("Ext2 client retry loop must yield while awaiting blockd")
 
     vfsd = require(ROOT / "userland/vfs/mistixvfsd.pas", (
-        "_binary_vfs_base_img_start", "VFS_RPC_OPEN", "VFS_RPC_READ",
-        "VFS_RPC_CLOSE", "ValidateArchive", "ArchiveFind", "SysIPCReceive",
+        "VFS_RPC_MOUNT_EXT2", "VFS_RPC_READDIR", "mistix_ext2_types.inc",
+        "mistix_ext2_client.inc", "VFS_ERR_NOTDIR", "VFS_ERR_IO",
+        "Ext2UMount", "Ext2UReadDirectory", "Ext2UReadFile",
+        "SourceKind: Byte; { 0=MFS1, 1=tmpfs, 2=read-only Ext2 }",
+        "BlockRequestEndpoint := BlockSendHandle",
     ))
-    blockd = require(ROOT / "userland/block/mistixblockd.pas", (
-        "BLOCK_RPC_INFO", "BLOCK_RPC_READ", "BLOCK_RPC_WRITE",
-        "BLOCK_RAMDISK_BYTES", "SysCapabilityReceive", "SysIPCSend",
-    ))
+    if "Ext2UReadFile(LongWord(OpenSlots[Slot].DataOffset)" not in vfsd or \
+       "@Ext2FileScratch[0]" not in vfsd or "SharedBuffer[I] := Ext2FileScratch[I]" not in vfsd:
+        fail("VFS read path must stage Ext2 data separately from the block RPC window")
+
     init = require(ROOT / "userland/init/mistixinit.pas", (
-        "TestVFSService", "TestBlockService", "SysCapabilityTransfer",
-        "VFSdPath", "BlockdPath", "VFS_RPC_PING", "BLOCK_RPC_WRITE",
+        "StartBlockService", "TestBlockService", "TestVFSService",
+        "BlockdPath", "VFSdPath", "SysCapabilityTransfer",
+        "BlockRequestHandle", "BlockReplyHandle", "VFS_RPC_MOUNT_EXT2",
+        "VFS RPC v3 handshake", "BLOCK_RPC_READ",
     ))
-    shm = require(KERNEL / "mistix_shm.inc", (
-        "P7_SHM_OBJECT_MAX", "P7_SHM_PAGES_MAX", "AddressSpaceMapPage",
-        "ProcessCapabilityInstall", "P7ShmReleaseProcess", "PTE_USER",
-    ))
-    process = require(KERNEL / "mistix_process.inc", (
-        "okMemoryObject", "AllowedRights", "P7ShmReleaseProcess(ProcessIndex)",
-    ))
-    shm = require(KERNEL / "mistix_shm.inc", (
-        "P7ShmProcessHasMappings", "P7ShmReleaseProcess",
-    ))
-    syscall = require(KERNEL / "mistix_syscall.inc", (
-        "MISTIX_ERR_BUSY", "P7ShmProcessHasMappings(CurrentProcessIndex)",
-    ))
-    vfsd = require(ROOT / "userland/vfs/mistixvfsd.pas", (
-        "VFS_RPC_CREATE", "VFS_RPC_WRITE", "VFS_RPC_UNLINK",
-        "VFS_SHARED_BASE", "TempPathAllowed", "SharedBuffer",
-    ))
-    blockd = require(ROOT / "userland/block/mistixblockd.pas", (
-        "BLOCK_SHARED_BASE", "SysShmMap", "SharedBuffer", "BLOCK_RPC_WRITE",
-    ))
-    devd = require(ROOT / "userland/device/mistixdevd.pas", (
-        "DEV_RPC_REGISTER", "DEV_RPC_LIST", "DEV_RPC_INFO", "DeviceRecord",
-    ))
-    netd = require(ROOT / "userland/network/mistixnetd.pas", (
-        "NET_RPC_IFINFO", "NET_RPC_ARP_LOOKUP", "NET_RPC_UDP_ECHO",
-        "BuildLoopbackFrame", "ValidateLoopbackFrame", "UDPChecksum",
-    ))
-    for token in ("TestDeviceManager", "TestNetworkService", "ShareMemoryWith",
-                  "VFS_RPC_CREATE", "VFS_RPC_WRITE", "SysShmCreate"):
-        if token not in init:
-            fail(f"init test harness is missing {token}")
+    if init.index("StartBlockService") > init.index("TestVFSService"):
+        fail("blockd must be started before vfsd mount negotiation")
 
     for name, path in {
         "shell": ROOT / "userland/sh/mistixsh.pas",
@@ -163,29 +174,37 @@ def main() -> int:
             fail(f"{name} is not a Pascal syscall-based user program")
 
     makefile = require(ROOT / "Makefile", (
-        "mistix_block.inc", "mistix_ext2.inc", "mistix_mount.inc",
-        "mistix_net.inc", "mistix_shm.inc", "vfs_base.img", "vfsd.elf", "blockd.elf",
-        "devd.elf", "netd.elf", "mistixdevd.pas", "mistixnetd.pas",
+        "mistix-phase8.iso", "mistix_block.inc", "mistix_ext2.inc",
+        "vfs_base.img", "vfsd.elf", "blockd.elf", "devd.elf", "netd.elf",
+        "userland/vfs/mistix_ext2_types.inc",
+        "userland/vfs/mistix_ext2_client.inc",
         "_binary_initfs_img_start", "userland/vfs/mistixvfsd.pas",
         "$(QEMU) -M pc",
     ))
+    if "Mistix Phase 7" in makefile or "mistix-phase7.iso" in makefile:
+        fail("Stale Phase 7 branding in Makefile")
     require(ROOT / "tools/mkinitfs.py", ("MFS1", "MFS1 supports at most 48 files"))
     require(ROOT / "README.md", (
-        "VFS サーバー", "ATA PIO", "Ext2", "blockd", "Pascal の実コンパイル",
-        "未実施", "Phase 7", "shared-memory",
+        "Phase 8", "block_register()", "blockd", "Ext2", "/mnt/disk",
+        "読み取り専用", "FPC 実コンパイル", "未確認",
+        "標準ファイル syscall 全体の broker 化は完了していません",
+    ))
+    require(ROOT / "docs/PHASE8-DESIGN.md", (
+        "Trust boundary", "blockd", "Ext2 mount policy",
+        "Why regular syscalls are not yet brokered",
     ))
 
     forbidden = list(ROOT.rglob("*.c")) + list(ROOT.rglob("*.h"))
     if forbidden:
         fail(f"Unexpected C source/header: {forbidden[0].relative_to(ROOT)}")
 
-    print("[ OK ] Kernel include graph and Phase 7 subsystem ordering checked.")
-    print("[ OK ] ATA PIO block layer, MBR scan, read-only Ext2 and mount metadata checked.")
-    print("[ OK ] Ethernet/IPv4/UDP parser and packet self-test are present.")
-    print("[ OK ] Userland VFS RPC, shared-memory block RPC and capability bootstrap checked.")
-    print("[ OK ] Phase 7 per-process shared-memory mappings, transferable memory capabilities, and fork safety checked.")
-    print("[ OK ] VFS tmpfs overlay, device registry, and loopback UDP service checked.")
-    print("[ OK ] MFS1 build graph and embedded service image symbols checked.")
+    print("[ OK ] Kernel include graph and Phase 8 syscall integration checked.")
+    print("[ OK ] Block service registration, ATA read-only syscall and RAM fallback checked.")
+    print("[ OK ] Shared-memory block RPC and bounded multi-batch sector reads checked.")
+    print("[ OK ] Userland Ext2 mount, inode/directory lookup and file read paths checked.")
+    print("[ OK ] VFS mount/read-dir RPC and init capability bootstrap checked.")
+    print("[ OK ] Existing Pascal shell, utilities, VFS overlay and network services retained.")
+    print("[ OK ] Makefile dependencies and Phase 8 documentation checked.")
     print("[NOTE] Structural checks do not replace FPC compilation or QEMU hardware testing.")
     return 0
 
