@@ -59,6 +59,7 @@ $(USER_BUILD_DIR): | $(BUILD_DIR)
 
 check-source:
 	$(PYTHON) tools/check_source.py
+	$(PYTHON) tools/check_phase11.py
 
 $(INIT_ELF): userland/init/mistixinit.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
 	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/init/mistixinit.pas
@@ -192,6 +193,9 @@ run-debug: iso
 clean:
 	rm -rf $(BUILD_DIR) *.o *.ppu
 
-.PHONY: phase10-check
+.PHONY: phase10-check phase11-check
 phase10-check:
 	$(PYTHON) tools/check_phase10.py
+
+phase11-check:
+	$(PYTHON) tools/check_phase11.py
