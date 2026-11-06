@@ -109,7 +109,7 @@ mistix-phase9/
 - broker はグローバルに1つの vfsd を登録するブートストラップ実装で、登録権限は PID 1 に限定しています。
 - broker は同時に1件の transaction のみ処理します。複数プロセスは `EAGAIN` を受け、ユーザーランド wrapper が `yield()` して再試行します。同じ slot の再試行では要求パラメータと OPEN パスを完全一致で検証し、別要求へのすり替えを `EBUSY` で拒否します。
 - syscall 1回の VFS I/O 上限は4096 bytesです。長い転送は呼び出し元が分割します。
-- `getdents()`、`chdir()`、`getcwd()`、`O_DIRECTORY` はまだカーネル内 VFS を利用します。Ext2 ディレクトリを通常 `ls` で列挙するための userland directory-FD proxy は未実装です。
+- `/mnt/disk` の `O_DIRECTORY` / `getdents()` と `chdir()` は Phase 11 で userland vfsd に委譲します。`getcwd()` はカーネルが保持する確定済み cwd を返し、ローカル InitFS/DevFS のディレクトリ操作は従来経路を維持します。
 - `/dev/*` はカーネル内デバイス処理を維持します。
 - 書き込み可能なのは `/tmp` overlay のみです。MFS1 と Ext2 は読み取り専用で、Ext2 journal、create/unlink/rename、永続 write は未対応です。
 - broker が永久に応答しない場合、wrapper は有限回の yield/retry 後に `EAGAIN` を返します。タイムアウトを監視する watchdog や要求キャンセルはありません。
@@ -118,7 +118,7 @@ mistix-phase9/
 - remote close queue は固定長です。ブローカーが長時間停止した状態で大量のファイルを開閉した場合の永続化は行いません。
 - `fork()` 後は remote open description を共有し、ファイル位置も共有します。Copy-on-Write と同様の UNIX 共有 open-file-description の意味論を意図しています。
 
-次段階では `getdents/chdir/getcwd` の broker 化、複数 outstanding RPC、キャンセル／タイムアウト、vfsd 再起動後の FD 回復、UID/GID/mode、Ext2 write transaction を進めます。
+次段階では複数 outstanding RPC、キャンセル／タイムアウト、vfsd 再起動後の FD 回復、UID/GID/mode、Ext2 write transaction、GETCWD RPC を進めます。
 
 
 ## Phase 10 — Directory and asynchronous VFS protocol groundwork
@@ -133,3 +133,25 @@ broker and vfsd can be upgraded atomically.
 See docs/PHASE10-DESIGN.md for protocol, lifecycle, security rules and gaps.
 
 Run: make phase10-check
+
+
+## Phase 11 — Userland Ext2 directory descriptors
+
+Phase 11 connects the Phase 10 directory protocol to the existing VFS broker
+for the read-only Ext2 namespace mounted at `/mnt/disk`.
+
+- `open(path, O_DIRECTORY)` for `/mnt/disk` obtains an opaque directory
+  handle from `vfsd` and stores it in a remote-directory open description.
+- `getdents(fd, buffer, count)` requests at most 16 packed entries per RPC.
+  The kernel validates the copied records before exposing them to userland.
+- `chdir(path)` under `/mnt/disk` is confirmed by `vfsd`; only then does
+  the kernel update the calling process's cwd.
+- Final close, `dup2` replacement and process exit reuse the remote close
+  queue. Ext2 `.` / `..` and unsafe names are filtered out.
+
+Run `make phase11-check` for static source-contract checks.
+
+The broker still permits one outstanding transaction. `getcwd()` continues
+to read the kernel's confirmed per-process cwd cache. Ext2 directory parsing
+is bounded to 128 visible entries and repeated for each batch. FPC
+compilation, ISO generation and QEMU runtime testing have not been run.
