@@ -32,6 +32,8 @@ type
     PendingCapabilityCount: Byte;
     PendingCapabilityHandles: array[0..PROCESS_PENDING_CAPS - 1] of LongWord;
     Capabilities: TProcessCapabilitySpace;
+    Files: TVFSProcessFiles;
+    CommandLine: array[0..VFS_PATH_MAX] of Char;
   end;
 
 var
@@ -379,6 +381,8 @@ begin
   ProcessTable[Slot].ReapRequested := 0;
   ProcessTable[Slot].PendingCapabilityCount := 0;
   ProcessCapabilitySpaceInitialize(ProcessTable[Slot].Capabilities);
+  VFSProcessInitialize(ProcessTable[Slot].Files);
+  ProcessTable[Slot].CommandLine[0] := #0;
   ProcessInitializeFrame(Slot);
   PID := ProcessTable[Slot].PID;
 
@@ -402,6 +406,7 @@ begin
   if ProcessTable[ProcessIndex].State = psFree then Exit;
   if ProcessTable[ProcessIndex].State <> psZombie then Exit;
   RootPhysical := ProcessTable[ProcessIndex].AddressSpaceRoot;
+  VFSProcessCloseAll(ProcessTable[ProcessIndex].Files);
   if (RootPhysical <> 0) and not AddressSpaceDestroy(RootPhysical) then
   begin
     WriteText('[FATAL] Could not reclaim zombie process address space.'#13#10);
@@ -419,6 +424,7 @@ begin
   ProcessTable[ProcessIndex].WaitStatusAddress := 0;
   ProcessTable[ProcessIndex].ReapRequested := 0;
   ProcessTable[ProcessIndex].PendingCapabilityCount := 0;
+  ProcessTable[ProcessIndex].CommandLine[0] := #0;
   ProcessCapabilitySpaceInitialize(ProcessTable[ProcessIndex].Capabilities);
 end;
 
@@ -607,6 +613,16 @@ begin
   ProcessTable[ChildIndex].PendingCapabilityCount := 0;
   ProcessCapabilitySpaceCopy(ProcessTable[ChildIndex].Capabilities,
     ProcessTable[ParentIndex].Capabilities);
+  if not VFSProcessClone(ProcessTable[ChildIndex].Files,
+       ProcessTable[ParentIndex].Files) then
+  begin
+    ProcessTable[ChildIndex].State := psZombie;
+    ProcessTable[ChildIndex].ReapRequested := 1;
+    ProcessFinalizeSlot(ChildIndex);
+    Exit;
+  end;
+  VFSSetCommandLine(ProcessTable[ChildIndex].CommandLine,
+    ProcessTable[ParentIndex].CommandLine);
 
   FrameBytes := SizeOf(TInterruptFrame) + 2 * SizeOf(QWord);
   DestinationBytes := PByte(PtrUInt(ProcessTable[ChildIndex].KernelStackTop - FrameBytes));
@@ -625,6 +641,8 @@ end;
 
 function ProcessSpawnFromUser(ImageAddress, ImageSize: QWord;
   out ChildPID: QWord): Boolean;
+var
+  ChildIndex: LongWord;
 begin
   Result := False;
   ChildPID := 0;
@@ -634,6 +652,79 @@ begin
        ImageAddress, @ProcessUserImageScratch[0], ImageSize) then Exit;
   Result := ProcessCreateFromELF(@ProcessUserImageScratch[0], ImageSize,
     ProcessTable[CurrentProcessIndex].PID, ChildPID);
+  if Result then
+  begin
+    if ProcessFindByPID(ChildPID, ChildIndex) then
+    begin
+      if not VFSProcessClone(ProcessTable[ChildIndex].Files,
+           ProcessTable[CurrentProcessIndex].Files) then
+      begin
+        ProcessTable[ChildIndex].State := psZombie;
+        ProcessTable[ChildIndex].ReapRequested := 1;
+        ProcessFinalizeSlot(ChildIndex);
+        Result := False;
+      end;
+    end;
+  end;
+end;
+
+function ProcessSpawnFromPath(PathAddress, ArgsAddress, InputFD,
+  OutputFD: QWord; out ChildPID: QWord): Boolean;
+var
+  Path: array[0..VFS_PATH_MAX] of Char;
+  Args: array[0..VFS_PATH_MAX] of Char;
+  Canonical: array[0..VFS_PATH_MAX] of Char;
+  Image: Pointer;
+  ImageSize: QWord;
+  ChildIndex: LongWord;
+begin
+  Result := False;
+  ChildPID := 0;
+  if CurrentProcessIndex >= PROCESS_MAX_COUNT then Exit;
+  if not VFSCopyUserString(ProcessTable[CurrentProcessIndex].AddressSpaceRoot,
+       PathAddress, Path) then Exit;
+  if ArgsAddress = 0 then Args[0] := #0
+  else if not VFSCopyUserString(ProcessTable[CurrentProcessIndex].AddressSpaceRoot,
+       ArgsAddress, Args) then Exit;
+  if not VFSNormalizePath(ProcessTable[CurrentProcessIndex].Files.CurrentDirectory,
+       Path, Canonical) then Exit;
+  if not VFSValidateSpawnFDs(ProcessTable[CurrentProcessIndex].Files,
+       InputFD, OutputFD) then Exit;
+  if not VFSLookupExecutable(Canonical, Image, ImageSize) then Exit;
+  if not ProcessCreateFromELF(Image, ImageSize,
+       ProcessTable[CurrentProcessIndex].PID, ChildPID) then Exit;
+  if not ProcessFindByPID(ChildPID, ChildIndex) then Exit;
+  if not VFSPrepareSpawnFromParent(ProcessTable[ChildIndex].Files,
+       ProcessTable[CurrentProcessIndex].Files, InputFD, OutputFD) then
+  begin
+    ProcessTable[ChildIndex].State := psZombie;
+    ProcessTable[ChildIndex].ReapRequested := 1;
+    ProcessFinalizeSlot(ChildIndex);
+    ChildPID := 0;
+    Exit;
+  end;
+  VFSSetCommandLine(ProcessTable[ChildIndex].CommandLine, Args);
+  VFSSetCommandLine(ProcessTable[ChildIndex].Files.CurrentDirectory,
+       ProcessTable[CurrentProcessIndex].Files.CurrentDirectory);
+  Result := True;
+end;
+
+function ProcessCopyCommandLine(ProcessIndex: LongWord; RootPhysical,
+  UserBuffer, Capacity: QWord): QWord;
+var
+  LengthValue: LongWord;
+begin
+  Result := QWord(-14);
+  if ProcessIndex >= PROCESS_MAX_COUNT then Exit;
+  LengthValue := VFSStringLength(ProcessTable[ProcessIndex].CommandLine) + 1;
+  if Capacity < LengthValue then
+  begin
+    Result := QWord(-36);
+    Exit;
+  end;
+  if not AddressSpaceCopyTo(RootPhysical, UserBuffer,
+       @ProcessTable[ProcessIndex].CommandLine[0], LengthValue) then Exit;
+  Result := LengthValue - 1;
 end;
 
 function ProcessEndpointCreate(var Process: TKernelProcess;
@@ -835,6 +926,7 @@ begin
   if (ProcessTable[ProcessIndex].State = psFree) or
      (ProcessTable[ProcessIndex].State = psZombie) then Exit;
   ProcessTable[ProcessIndex].ExitCode := ExitCode;
+  VFSProcessCloseAll(ProcessTable[ProcessIndex].Files);
   ProcessTable[ProcessIndex].State := psZombie;
   ProcessWakeParentOnExit(ProcessIndex);
 end;

@@ -14,139 +14,111 @@ USER_BUILD_DIR := $(BUILD_DIR)/user
 ISO_ROOT  := $(BUILD_DIR)/iso_root
 KERNEL_OBJ := $(BUILD_DIR)/mistixkernel.o
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
-INIT_OBJ := $(USER_BUILD_DIR)/mistixinit.o
 INIT_ELF := $(USER_BUILD_DIR)/init.elf
-WORKER_OBJ := $(USER_BUILD_DIR)/mistixworker.o
-WORKER_ELF := $(USER_BUILD_DIR)/worker.elf
-WORKER_BLOB_OBJ := $(USER_BUILD_DIR)/worker_blob.o
+SHELL_ELF := $(USER_BUILD_DIR)/sh.elf
+LS_ELF := $(USER_BUILD_DIR)/ls.elf
+CAT_ELF := $(USER_BUILD_DIR)/cat.elf
+ECHO_ELF := $(USER_BUILD_DIR)/echo.elf
+INITFS_IMG := $(BUILD_DIR)/initfs.img
+INITFS_BLOB_OBJ := $(BUILD_DIR)/initfs_blob.o
 USER_BLOB_OBJ := $(BUILD_DIR)/user_init_blob.o
-ISO_IMAGE := $(BUILD_DIR)/mistix-phase4.iso
-SRC_DIR   := src/kernel
-PASCAL_SOURCES := $(SRC_DIR)/mistixkernel.pas \
-                  $(SRC_DIR)/mistix_types.inc \
-                  $(SRC_DIR)/mistix_console.inc \
-                  $(SRC_DIR)/mistix_cpu.inc \
-                  $(SRC_DIR)/mistix_memory.inc \
-                  $(SRC_DIR)/mistix_threads.inc \
-                  $(SRC_DIR)/mistix_capability.inc \
-                  $(SRC_DIR)/mistix_ipc.inc \
-                  $(SRC_DIR)/mistix_notification.inc \
-                  $(SRC_DIR)/mistix_memory_object.inc \
-                  $(SRC_DIR)/mistix_address_space.inc \
-                  $(SRC_DIR)/mistix_cow.inc \
-                  $(SRC_DIR)/mistix_process.inc \
-                  $(SRC_DIR)/mistix_syscall.inc \
-                  $(SRC_DIR)/mistix_timer.inc \
-                  $(SRC_DIR)/mistix_trap.inc \
-                  $(SRC_DIR)/mistix_main.inc
+ISO_IMAGE := $(BUILD_DIR)/mistix-phase5.iso
+SRC_DIR := src/kernel
+PASCAL_SOURCES := $(SRC_DIR)/mistixkernel.pas $(SRC_DIR)/mistix_types.inc \
+  $(SRC_DIR)/mistix_console.inc $(SRC_DIR)/mistix_cpu.inc \
+  $(SRC_DIR)/mistix_memory.inc $(SRC_DIR)/mistix_threads.inc \
+  $(SRC_DIR)/mistix_capability.inc $(SRC_DIR)/mistix_ipc.inc \
+  $(SRC_DIR)/mistix_notification.inc $(SRC_DIR)/mistix_memory_object.inc \
+  $(SRC_DIR)/mistix_address_space.inc $(SRC_DIR)/mistix_cow.inc \
+  $(SRC_DIR)/mistix_vfs.inc $(SRC_DIR)/mistix_process.inc \
+  $(SRC_DIR)/mistix_syscall.inc $(SRC_DIR)/mistix_timer.inc \
+  $(SRC_DIR)/mistix_trap.inc $(SRC_DIR)/mistix_main.inc
 
-.PHONY: all check-source check-tools user user-verify worker-verify kernel verify iso run run-debug clean
+.PHONY: all check-source check-tools user user-verify initfs kernel verify iso run run-debug clean
 
 all: check-source user-verify kernel verify
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
-
 $(USER_BUILD_DIR): | $(BUILD_DIR)
 	mkdir -p $(USER_BUILD_DIR)
 
 check-source:
 	$(PYTHON) tools/check_source.py
 
-user: user-verify
+$(INIT_ELF): userland/init/mistixinit.pas userland/common/mistixlib.inc userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/init/mistixinit.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixinit.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@! $(NM) -u $@ | grep -q .
 
-$(WORKER_OBJ): userland/worker/mistixworker.pas | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. ../../userland/worker/mistixworker.pas
-	@test -f $(WORKER_OBJ) || { echo "FPC did not create $(WORKER_OBJ)"; exit 1; }
+$(SHELL_ELF): userland/sh/mistixsh.pas userland/common/mistixlib.inc userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/sh/mistixsh.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixsh.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@! $(NM) -u $@ | grep -q .
 
-$(WORKER_ELF): $(WORKER_OBJ) userland/user.ld
-	@set -eu; \
-	UNDEFINED="$$($(NM) -u $(WORKER_OBJ) 2>/dev/null || true)"; \
-	if [ -n "$$UNDEFINED" ]; then \
-	  echo 'Worker Pascal object unexpectedly depends on external runtime symbols:'; \
-	  echo "$$UNDEFINED"; exit 1; \
-	fi
-	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 \
-	  -T userland/user.ld -o $(WORKER_ELF) $(WORKER_OBJ)
-	@$(READELF) -h $(WORKER_ELF) | grep -q 'ELF64' || { echo 'Worker image is not ELF64'; exit 1; }
-	@if $(NM) -u $(WORKER_ELF) 2>/dev/null | grep -q .; then echo 'Worker ELF has unresolved symbols'; $(NM) -u $(WORKER_ELF); exit 1; fi
-	@$(NM) $(WORKER_ELF) | grep -q ' _start$$' || { echo 'Worker ELF has no _start'; exit 1; }
+$(LS_ELF): userland/bin/mistixls.pas userland/common/mistixlib.inc userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixls.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixls.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@! $(NM) -u $@ | grep -q .
 
-$(WORKER_BLOB_OBJ): $(WORKER_ELF)
-	cd $(USER_BUILD_DIR) && $(LD) -r -b binary -o worker_blob.o worker.elf
+$(CAT_ELF): userland/bin/mistixcat.pas userland/common/mistixlib.inc userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixcat.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixcat.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@! $(NM) -u $@ | grep -q .
 
-$(INIT_OBJ): userland/init/mistixinit.pas | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. ../../userland/init/mistixinit.pas
-	@test -f $(INIT_OBJ) || { echo "FPC did not create $(INIT_OBJ)"; exit 1; }
+$(ECHO_ELF): userland/bin/mistixecho.pas userland/common/mistixlib.inc userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixecho.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixecho.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@! $(NM) -u $@ | grep -q .
 
-$(INIT_ELF): $(INIT_OBJ) $(WORKER_BLOB_OBJ) userland/user.ld
-	@set -eu; \
-	UNDEFINED="$$($(NM) -u $(INIT_OBJ) 2>/dev/null | grep -v '_binary_worker_elf_' || true)"; \
-	if [ -n "$$UNDEFINED" ]; then \
-	  echo 'Init Pascal object unexpectedly depends on external runtime symbols:'; \
-	  echo "$$UNDEFINED"; exit 1; \
-	fi
-	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 \
-	  -T userland/user.ld -o $(INIT_ELF) $(INIT_OBJ) $(WORKER_BLOB_OBJ)
-	@$(READELF) -h $(INIT_ELF) | grep -q 'ELF64' || { echo 'Init image is not ELF64'; exit 1; }
-	@if $(NM) -u $(INIT_ELF) 2>/dev/null | grep -q .; then echo 'Init ELF has unresolved symbols'; $(NM) -u $(INIT_ELF); exit 1; fi
-	@$(NM) $(INIT_ELF) | grep -q ' _start$$' || { echo 'Init ELF has no _start'; exit 1; }
-	@$(NM) $(INIT_ELF) | grep -q ' _binary_worker_elf_start$$' || { echo 'Embedded worker ELF is missing'; exit 1; }
+$(INITFS_IMG): $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) tools/mkinitfs.py docs/motd.txt
+	$(PYTHON) tools/mkinitfs.py $@ --file /bin/sh=$(SHELL_ELF) --file /bin/ls=$(LS_ELF) --file /bin/cat=$(CAT_ELF) --file /bin/echo=$(ECHO_ELF) --file /etc/motd=docs/motd.txt
 
-worker-verify: check-source $(WORKER_ELF)
-	@echo 'Mistix Pascal worker ELF verification passed.'
-	@$(READELF) -l $(WORKER_ELF)
-
-user-verify: check-source $(INIT_ELF) $(WORKER_ELF)
-	@echo 'Mistix Pascal init + worker ELF verification passed.'
-	@$(READELF) -h $(INIT_ELF) | grep 'Entry point address'
+$(INITFS_BLOB_OBJ): $(INITFS_IMG)
+	cd $(BUILD_DIR) && $(LD) -r -b binary -o initfs_blob.o initfs.img
 
 $(USER_BLOB_OBJ): $(INIT_ELF) | $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(LD) -r -b binary -o user_init_blob.o user/init.elf
 
-$(KERNEL_OBJ): $(PASCAL_SOURCES) $(USER_BLOB_OBJ) | $(BUILD_DIR)
+$(KERNEL_OBJ): $(PASCAL_SOURCES) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ) | $(BUILD_DIR)
 	$(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU$(BUILD_DIR) -FE$(BUILD_DIR) -Fu$(SRC_DIR) $(SRC_DIR)/mistixkernel.pas
 	@test -f $(KERNEL_OBJ) || { echo "FPC did not create $(KERNEL_OBJ)"; exit 1; }
 
-$(KERNEL_ELF): $(KERNEL_OBJ) $(USER_BLOB_OBJ) linker.ld
-	@set -eu; \
-	UNDEFINED="$$($(NM) -u $(KERNEL_OBJ) 2>/dev/null | grep -v '_binary_user_init_elf_' || true)"; \
-	if [ -n "$$UNDEFINED" ]; then \
-	  echo 'Unexpected unresolved symbols in freestanding Pascal kernel object:'; \
-	  echo "$$UNDEFINED"; \
-	  echo 'Only embedded user-image boundary symbols may be unresolved before final link.'; \
-	  exit 1; \
-	fi
-	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 \
-	  -T linker.ld -o $(KERNEL_ELF) $(KERNEL_OBJ) $(USER_BLOB_OBJ)
+$(KERNEL_ELF): $(KERNEL_OBJ) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ) linker.ld
+	@set -eu; UNDEFINED="$$($(NM) -u $(KERNEL_OBJ) 2>/dev/null | grep -v '_binary_user_init_elf_' | grep -v '_binary_initfs_img_' || true)"; \
+	if [ -n "$$UNDEFINED" ]; then echo 'Unexpected unresolved kernel symbols:'; echo "$$UNDEFINED"; exit 1; fi
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T linker.ld -o $@ $(KERNEL_OBJ) $(USER_BLOB_OBJ) $(INITFS_BLOB_OBJ)
 
+user: user-verify
+user-verify: check-source $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(INITFS_IMG)
+	@echo 'Mistix Pascal init, shell, utilities and InitFS verification targets built.'
+
+initfs: $(INITFS_IMG)
 kernel: check-source $(KERNEL_ELF)
-
-verify: $(KERNEL_ELF) $(INIT_ELF) $(WORKER_ELF)
-	@$(READELF) -h $(KERNEL_ELF) | grep -q 'ELF64' || { echo 'Kernel is not ELF64'; exit 1; }
+verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF)
+	@$(READELF) -h $(KERNEL_ELF) | grep -q ELF64
 	@if $(NM) -u $(KERNEL_ELF) 2>/dev/null | grep -q .; then echo 'Kernel has unresolved symbols'; $(NM) -u $(KERNEL_ELF); exit 1; fi
-	@$(NM) $(KERNEL_ELF) | grep -q ' _start$$' || { echo 'Missing kernel _start'; exit 1; }
-	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_trap_dispatch$$' || { echo 'Missing trap dispatcher'; exit 1; }
-	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_timer_isr$$' || { echo 'Missing PIT ISR'; exit 1; }
-	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_process_restore_frame$$' || { echo 'Missing process frame restore'; exit 1; }
-	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_user_init_elf_start$$' || { echo 'Embedded init image is missing'; exit 1; }
-	@$(READELF) -l $(INIT_ELF) | grep -q 'LOAD' || { echo 'Init ELF has no load segment'; exit 1; }
-	@$(READELF) -l $(WORKER_ELF) | grep -q 'LOAD' || { echo 'Worker ELF has no load segment'; exit 1; }
-	@echo 'Mistix Phase 4 kernel, init ELF and worker ELF verification passed.'
-	@$(READELF) -h $(KERNEL_ELF) | grep 'Entry point address'
+	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_trap_dispatch$$'
+	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_user_init_elf_start$$'
+	@$(NM) $(KERNEL_ELF) | grep -q ' _binary_initfs_img_start$$'
+	@echo 'Mistix Phase 5 ELF and embedded InitFS checks passed.'
 
 check-tools:
 	@command -v $(FPC) >/dev/null || { echo 'Missing Free Pascal Compiler (fpc)'; exit 1; }
 	@command -v $(LD) >/dev/null || { echo 'Missing GNU ld'; exit 1; }
-	@command -v $(NM) >/dev/null || { echo 'Missing nm (binutils)'; exit 1; }
-	@command -v $(READELF) >/dev/null || { echo 'Missing readelf (binutils)'; exit 1; }
+	@command -v $(NM) >/dev/null || { echo 'Missing nm'; exit 1; }
+	@command -v $(READELF) >/dev/null || { echo 'Missing readelf'; exit 1; }
 	@command -v $(XORRISO) >/dev/null || { echo 'Missing xorriso'; exit 1; }
 	@command -v $(QEMU) >/dev/null || { echo 'Missing qemu-system-x86_64'; exit 1; }
 	@command -v $(PYTHON) >/dev/null || { echo 'Missing python3'; exit 1; }
 	@test -x "$(LIMINE_DIR)/bin/limine" || { echo 'Set LIMINE_DIR to a built Limine v12 tree'; exit 1; }
 
 iso: verify
-	@test -x "$(LIMINE_DIR)/bin/limine" || { echo 'Set LIMINE_DIR to a built Limine v12 tree'; exit 1; }
 	@test -f "$(LIMINE_DIR)/bin/limine-bios.sys" || { echo 'Missing Limine BIOS stage 2'; exit 1; }
 	@test -f "$(LIMINE_DIR)/bin/limine-bios-cd.bin" || { echo 'Missing Limine BIOS CD image'; exit 1; }
 	@test -f "$(LIMINE_DIR)/bin/limine-uefi-cd.bin" || { echo 'Missing Limine UEFI CD image'; exit 1; }
@@ -159,20 +131,13 @@ iso: verify
 	cp $(LIMINE_DIR)/bin/limine-bios-cd.bin $(ISO_ROOT)/boot/
 	cp $(LIMINE_DIR)/bin/limine-uefi-cd.bin $(ISO_ROOT)/boot/
 	cp $(LIMINE_DIR)/bin/BOOTX64.EFI $(ISO_ROOT)/EFI/BOOT/BOOTX64.EFI
-	$(XORRISO) -as mkisofs -R -r -J \
-	  -b boot/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
-	  --efi-boot boot/limine-uefi-cd.bin -efi-boot-part --efi-boot-image \
-	  --protective-msdos-label $(ISO_ROOT) -o $(ISO_IMAGE)
+	$(XORRISO) -as mkisofs -R -r -J -b boot/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot boot/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label $(ISO_ROOT) -o $(ISO_IMAGE)
 	$(LIMINE_DIR)/bin/limine bios-install $(ISO_IMAGE)
 	@echo 'Created $(ISO_IMAGE)'
 
 run: iso
-	$(QEMU) -M q35 -m 256M -smp 1 -cdrom $(ISO_IMAGE) -boot d \
-	  -serial stdio -no-reboot -no-shutdown
-
+	$(QEMU) -M q35 -m 256M -smp 1 -cdrom $(ISO_IMAGE) -boot d -serial stdio -no-reboot -no-shutdown
 run-debug: iso
-	$(QEMU) -M q35 -m 256M -smp 1 -cdrom $(ISO_IMAGE) -boot d \
-	  -serial stdio -no-reboot -no-shutdown -s -S
-
+	$(QEMU) -M q35 -m 256M -smp 1 -cdrom $(ISO_IMAGE) -boot d -serial stdio -no-reboot -no-shutdown -s -S
 clean:
 	rm -rf $(BUILD_DIR) *.o *.ppu

@@ -44,6 +44,12 @@ begin
   Result := True;
 end;
 
+procedure GetEmbeddedInitFS(var ImageStart, ImageEnd: Pointer);
+begin
+  ImageStart := @EmbeddedInitFSStart;
+  ImageEnd := @EmbeddedInitFSEnd;
+end;
+
 procedure KernelMain; cdecl; public name 'mistix_kernel_main';
 var
   Memmap: PLimineMemmapResponse;
@@ -52,15 +58,18 @@ var
   NotificationTestOK: Boolean;
   MemoryObjectTestOK: Boolean;
   ProcessCapTestOK: Boolean;
+  VFSTestOK: Boolean;
   UserImageStart: Pointer;
   UserImageEnd: Pointer;
   UserImageSize: QWord;
+  InitFSStart: Pointer;
+  InitFSEnd: Pointer;
   InitialPID: QWord;
 begin
   SerialInit;
   WriteText(#13#10'============================================================'#13#10);
-  WriteText(' Mistix - Phase 4: preemptive multi-process microkernel      '#13#10);
-  WriteText(' Pascal freestanding kernel / x86-64 / COW / user IPC       '#13#10);
+  WriteText(' Mistix - Phase 5: UNIX foundation / Pascal userland        '#13#10);
+  WriteText(' Pascal freestanding kernel / VFS / pipes / shell           '#13#10);
   WriteText('============================================================'#13#10);
 
   if not ValidateBootInformation then
@@ -85,8 +94,16 @@ begin
   MemoryObjectInitialize;
   COWInitialize;
   ProcessManagerInitialize;
+  GetEmbeddedInitFS(InitFSStart, InitFSEnd);
+  VFSInitialize(InitFSStart, InitFSEnd);
+  VFSTestOK := VFSSelfTest;
+  if not VFSTestOK then
+  begin
+    WriteText('[FAIL] VFS self-test failed.'#13#10);
+    HaltForever;
+  end;
 
-  WriteText(#13#10'[PHASE 4] Kernel service self-tests.'#13#10);
+  WriteText(#13#10'[PHASE 5] UNIX foundation initialised.'#13#10);
   IPCTestOK := IPCRendezvousSelfTest;
   NotificationTestOK := NotificationSelfTest;
   MemoryObjectTestOK := MemoryObjectAliasSelfTest;
@@ -118,11 +135,11 @@ begin
 
   SyscallInitialize;
   TimerInitialize;
-  WriteText(#13#10'[PASS] Phase 4 process scheduler, PIT preemption, fork/COW,'#13#10);
-  WriteText('       spawn/wait, per-process capabilities and user IPC ready.'#13#10);
-  WriteText('[NOTE] Single CPU; legacy 8259 PIC/PIT; no SMP or APIC yet.'#13#10);
-  WriteText('[NOTE] User syscalls: write, exit, getpid, yield, fork, spawn,'#13#10);
-  WriteText('       waitpid, endpoint_create, ipc_send/receive, cap_transfer.'#13#10);
+  WriteText(#13#10'[PASS] Phase 5 VFS, InitFS, DevFS, descriptors, pipes and Pascal userland initialised.'#13#10);
+  WriteText('[NOTE] VFS is a bootstrap in-kernel core; move to userland service later.'#13#10);
+  WriteText('[NOTE] Single CPU; legacy PIC/PIT; raw serial TTY; no SMP yet.'#13#10);
+  WriteText('[NOTE] User syscalls: process/IPC, open/read/write/close, dup2, pipe,'#13#10);
+  WriteText('       getdents, chdir, getcwd, spawn_path and getcmdline.'#13#10);
 
   ProcessLaunch(InitialPID);
   HaltForever;

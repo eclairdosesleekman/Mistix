@@ -24,6 +24,7 @@ implementation
 {$I mistix_memory_object.inc}
 {$I mistix_address_space.inc}
 {$I mistix_cow.inc}
+{$I mistix_vfs.inc}
 {$I mistix_process.inc}
 {$I mistix_syscall.inc}
 {$I mistix_timer.inc}

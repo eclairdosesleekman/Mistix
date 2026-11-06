@@ -1,4 +1,4 @@
-{ Mistix Phase 4 syscall ABI. RAX=number/result, args in RDI/RSI/RDX. }
+{ Mistix Phase 5 syscall ABI. RAX=number/result, args in RDI/RSI/RDX. }
 
 const
   MISTIX_SYSCALL_WRITE = 1;
@@ -15,6 +15,16 @@ const
   MISTIX_SYSCALL_CAP_RECEIVE = 12;
   MISTIX_SYSCALL_CAP_CLOSE = 13;
   MISTIX_SYSCALL_KILL = 14;
+  MISTIX_SYSCALL_OPEN = 15;
+  MISTIX_SYSCALL_READ = 16;
+  MISTIX_SYSCALL_CLOSE = 17;
+  MISTIX_SYSCALL_DUP2 = 18;
+  MISTIX_SYSCALL_PIPE = 19;
+  MISTIX_SYSCALL_GETDENTS = 20;
+  MISTIX_SYSCALL_CHDIR = 21;
+  MISTIX_SYSCALL_GETCWD = 22;
+  MISTIX_SYSCALL_SPAWN_PATH = 23;
+  MISTIX_SYSCALL_GETCMDLINE = 24;
 
   MISTIX_SYSCALL_MAX_WRITE = 4096;
   MISTIX_ERR_BADF = $FFFFFFFFFFFFFFF7;
@@ -40,31 +50,16 @@ end;
 
 function SyscallWriteUserBuffer(Process: PKernelProcess;
   FileDescriptor, BufferAddress, ByteCount: QWord): QWord;
-var
-  Buffer: array[0..MISTIX_SYSCALL_MAX_WRITE - 1] of Byte;
-  I: QWord;
 begin
-  Result := MISTIX_ERR_BADF;
-  if (FileDescriptor <> 1) and (FileDescriptor <> 2) then Exit;
-  if ByteCount = 0 then
-  begin
-    Result := 0;
-    Exit;
-  end;
-  if ByteCount > MISTIX_SYSCALL_MAX_WRITE then
-  begin
-    Result := MISTIX_ERR_INVAL;
-    Exit;
-  end;
-  if not AddressSpaceCopyFrom(Process^.AddressSpaceRoot, BufferAddress,
-       @Buffer[0], ByteCount) then
-  begin
-    Result := MISTIX_ERR_FAULT;
-    Exit;
-  end;
-  for I := 0 to ByteCount - 1 do
-    SerialPutChar(Char(Buffer[I]));
-  Result := ByteCount;
+  Result := VFSWriteUser(Process^.Files, Process^.AddressSpaceRoot,
+    FileDescriptor, BufferAddress, ByteCount);
+end;
+
+function SyscallReadUserBuffer(Process: PKernelProcess;
+  FileDescriptor, BufferAddress, ByteCount: QWord): QWord;
+begin
+  Result := VFSReadUser(Process^.Files, Process^.AddressSpaceRoot,
+    FileDescriptor, BufferAddress, ByteCount);
 end;
 
 function SyscallDispatchFrame(Frame: PInterruptFrame): QWord;
@@ -182,6 +177,50 @@ begin
           Exit;
         end;
       end;
+
+    MISTIX_SYSCALL_OPEN:
+      ReturnValue := VFSOpenUser(Process^.Files, Process^.AddressSpaceRoot,
+        Frame^.SavedRDI, Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_READ:
+      ReturnValue := SyscallReadUserBuffer(Process, Frame^.SavedRDI,
+        Frame^.SavedRSI, Frame^.SavedRDX);
+
+    MISTIX_SYSCALL_CLOSE:
+      ReturnValue := VFSCloseUser(Process^.Files, Frame^.SavedRDI);
+
+    MISTIX_SYSCALL_DUP2:
+      ReturnValue := VFSDup2User(Process^.Files, Frame^.SavedRDI,
+        Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_PIPE:
+      ReturnValue := VFSPipeUser(Process^.Files, Process^.AddressSpaceRoot,
+        Frame^.SavedRDI);
+
+    MISTIX_SYSCALL_GETDENTS:
+      ReturnValue := VFSGetDentsUser(Process^.Files, Process^.AddressSpaceRoot,
+        Frame^.SavedRDI, Frame^.SavedRSI, Frame^.SavedRDX);
+
+    MISTIX_SYSCALL_CHDIR:
+      ReturnValue := VFSChdirUser(Process^.Files, Process^.AddressSpaceRoot,
+        Frame^.SavedRDI);
+
+    MISTIX_SYSCALL_GETCWD:
+      ReturnValue := VFSGetCWDUser(Process^.Files, Process^.AddressSpaceRoot,
+        Frame^.SavedRDI, Frame^.SavedRSI);
+
+    MISTIX_SYSCALL_SPAWN_PATH:
+      begin
+        if ProcessSpawnFromPath(Frame^.SavedRDI, Frame^.SavedRSI,
+             Frame^.SavedRDX, Frame^.SavedRCX, ChildPID) then
+          ReturnValue := ChildPID
+        else
+          ReturnValue := MISTIX_ERR_NOENT;
+      end;
+
+    MISTIX_SYSCALL_GETCMDLINE:
+      ReturnValue := ProcessCopyCommandLine(CurrentProcessIndex,
+        Process^.AddressSpaceRoot, Frame^.SavedRDI, Frame^.SavedRSI);
   end;
 
   Frame^.SavedRAX := ReturnValue;

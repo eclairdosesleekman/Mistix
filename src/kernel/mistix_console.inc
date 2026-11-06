@@ -82,3 +82,12 @@ begin
     SerialPutChar(Digits[Count]);
   end;
 end;
+
+function SerialTryGetChar(out C: Char): Boolean;
+begin
+  Result := False;
+  C := #0;
+  if (In8(COM1_LSR) and $01) = 0 then Exit;
+  C := Char(In8(COM1_DATA) and $FF);
+  Result := True;
+end;

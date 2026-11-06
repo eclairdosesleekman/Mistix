@@ -1,0 +1,3 @@
+Welcome to Mistix!
+A Pascal-native UNIX-like operating system.
+Type help to see available commands.
