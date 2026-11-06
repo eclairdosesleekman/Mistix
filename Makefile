@@ -1,20 +1,28 @@
 SHELL := /bin/sh
 
-FPC       ?= fpc
-LD        ?= ld
-NM        ?= nm
-READELF   ?= readelf
-XORRISO   ?= xorriso
-QEMU      ?= qemu-system-x86_64
+FPC        ?= fpc
+LD         ?= ld
+NM         ?= nm
+READELF    ?= readelf
+XORRISO    ?= xorriso
+QEMU       ?= qemu-system-x86_64
 LIMINE_DIR ?= ../limine
 
 BUILD_DIR := build
 ISO_ROOT  := $(BUILD_DIR)/iso_root
 KERNEL_OBJ := $(BUILD_DIR)/mistixkernel.o
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
-ISO_IMAGE := $(BUILD_DIR)/mistix-phase0.iso
+ISO_IMAGE := $(BUILD_DIR)/mistix-phase1.iso
+SRC_DIR   := src/kernel
+PASCAL_SOURCES := $(SRC_DIR)/mistixkernel.pas \
+                  $(SRC_DIR)/mistix_types.inc \
+                  $(SRC_DIR)/mistix_console.inc \
+                  $(SRC_DIR)/mistix_cpu.inc \
+                  $(SRC_DIR)/mistix_memory.inc \
+                  $(SRC_DIR)/mistix_threads.inc \
+                  $(SRC_DIR)/mistix_main.inc
 
-.PHONY: all kernel verify iso run clean check-tools
+.PHONY: all kernel verify iso run run-debug clean check-tools
 
 all: kernel verify
 
@@ -23,8 +31,8 @@ $(BUILD_DIR):
 
 kernel: $(KERNEL_ELF)
 
-$(KERNEL_OBJ): src/kernel/mistixkernel.pas | $(BUILD_DIR)
-	$(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU$(BUILD_DIR) $<
+$(KERNEL_OBJ): $(PASCAL_SOURCES) | $(BUILD_DIR)
+	$(FPC) -Tlinux -Px86_64 -Cn -O- -g- -FU$(BUILD_DIR) -FE$(BUILD_DIR) -Fu$(SRC_DIR) $(SRC_DIR)/mistixkernel.pas
 	@test -f $(KERNEL_OBJ) || { echo "FPC did not create $(KERNEL_OBJ)"; exit 1; }
 
 $(KERNEL_ELF): $(KERNEL_OBJ) linker.ld
@@ -33,7 +41,7 @@ $(KERNEL_ELF): $(KERNEL_OBJ) linker.ld
 	if [ -n "$$UNDEFINED" ]; then \
 	  echo "Unexpected unresolved symbols in the freestanding Pascal object:"; \
 	  echo "$$UNDEFINED"; \
-	  echo "The kernel must not depend on the host/FPC runtime."; \
+	  echo "Mistix must not depend on the hosted FPC/OS runtime."; \
 	  exit 1; \
 	fi
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 \
@@ -43,8 +51,10 @@ verify: $(KERNEL_ELF)
 	@$(READELF) -h $(KERNEL_ELF) | grep -q 'ELF64' || { echo 'Not an ELF64 image'; exit 1; }
 	@$(NM) -u $(KERNEL_ELF) 2>/dev/null | grep -q . && { echo 'Kernel has unresolved symbols'; exit 1; } || true
 	@$(NM) $(KERNEL_ELF) | grep -q ' _start$$' || { echo 'Missing _start entry point'; exit 1; }
-	@echo 'Kernel ELF verification passed.'
-	@$(READELF) -h $(KERNEL_ELF) | grep -E 'Entry point|エントリポイント'
+	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_exception_dispatch$$' || { echo 'Missing exception dispatcher'; exit 1; }
+	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_context_switch$$' || { echo 'Missing context-switch routine'; exit 1; }
+	@echo 'Mistix Phase 1 ELF verification passed.'
+	@$(READELF) -h $(KERNEL_ELF) | grep 'Entry point address'
 
 check-tools:
 	@command -v $(FPC) >/dev/null || { echo 'Missing Free Pascal Compiler (fpc)'; exit 1; }
@@ -79,6 +89,10 @@ iso: $(KERNEL_ELF)
 run: iso
 	$(QEMU) -M q35 -m 256M -smp 1 -cdrom $(ISO_IMAGE) -boot d \
 	  -serial stdio -no-reboot -no-shutdown
+
+run-debug: iso
+	$(QEMU) -M q35 -m 256M -smp 1 -cdrom $(ISO_IMAGE) -boot d \
+	  -serial stdio -no-reboot -no-shutdown -s -S
 
 clean:
 	rm -rf $(BUILD_DIR) *.o *.ppu
