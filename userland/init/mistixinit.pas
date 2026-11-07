@@ -38,7 +38,7 @@ const
   RuntimePageWriteName: array[0..10] of Char = 'page-write'#0;
   RuntimePageTextWriteName: array[0..10] of Char = 'text-write'#0;
   RuntimePageExecNXName: array[0..13] of Char = 'stack-nx-exec'#0;
-  PAGE_FAULT_STATUS_BASE = QWord($8000000000000000) or (QWord(14) shl 32);
+  PAGE_FAULT_STATUS_BASE = not QWord($7FFFFFF1FFFFFFFF);
 
   VFS_RPC_PING  = $4D56534600000001;
   VFS_RPC_OPEN  = $4D56534600000002;
