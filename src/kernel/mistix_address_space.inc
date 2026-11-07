@@ -68,6 +68,15 @@ asm
   mov cr3, rdi
 end;
 
+function AddressSpaceActivate(RootPhysical: QWord): Boolean;
+begin
+  Result := False;
+  if (RootPhysical = 0) or
+     ((RootPhysical and (PAGE_SIZE - 1)) <> 0) then Exit;
+  WriteCR3(RootPhysical);
+  Result := (ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical;
+end;
+
 function AddressSpaceCreate(out RootPhysical: QWord): Boolean;
 var
   NewRoot: QWord;
