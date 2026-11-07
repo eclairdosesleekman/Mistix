@@ -1110,7 +1110,7 @@ begin
   end
   else
     Exit;
-  if CopyBytes > VFS_BROKER_SLOT_SIZE then Exit;
+  if (CopyBytes = 0) or (CopyBytes > VFS_BROKER_SLOT_SIZE) then Exit;
   for I := 0 to LongWord(CopyBytes) - 1 do
     SharedBuffer[BufferOffset + I] := SharedBuffer[I];
 end;
