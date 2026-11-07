@@ -30,8 +30,8 @@ def main() -> int:
     require("tools/tests/fpc_runtime_probe.pas", (
         "procedure ProbeRange(Index: LongInt)",
         "ProbeTable[Index] := Byte(Index)",
-        "procedure ProbeOverflow(Left, Right: LongInt)",
-        "ProbeArithmeticResult := Left + Right",
+        "procedure ProbeOverflow(Left, Right: Int64)",
+        "ProbeArithmeticResult: Int64","ProbeArithmeticResult := Left + Right",
         "procedure ProbeDivideByZero(Numerator, Denominator: LongInt)",
         "Numerator div Denominator",
         "{$R+}", "{$Q+}",
