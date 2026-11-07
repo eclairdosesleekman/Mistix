@@ -53,6 +53,10 @@ def main() -> int:
         "[ OK ] Phase 17 runtime fault isolation tests passed.",
         "[ OK ] Phase 18 user-mode page-fault isolation tests passed.",
     ))
+    require("Makefile", (
+        "status=$?; set -e",
+        "if [ $status -ne 124 ] && [ $status -ne 0 ]",
+    ))
     require("src/kernel/mistix_trap.inc", (
         "if (Vector = 14) and (CurrentProcessIndex < PROCESS_MAX_COUNT) then",
         "ExitCode := QWord($8000000000000000) or (Vector shl 32) or",
@@ -64,6 +68,13 @@ def main() -> int:
         "PageFlags := PTE_USER;",
         "PageFlags := PageFlags or PTE_WRITABLE;",
         "PageFlags := PageFlags or PTE_NO_EXECUTE;",
+        "StagingFlags := PTE_USER or PTE_WRITABLE or PTE_NO_EXECUTE",
+        "if not AddressSpaceMapZeroPage(RootPhysical, PageAddress,",
+        "if not AddressSpaceCopyTo(RootPhysical, ProgramHeader^.VirtualAddress,",
+        "if not AddressSpaceSetPageFlags(RootPhysical, PageAddress,",
+        "function AddressSpaceSetPageFlags(RootPhysical, VirtualAddress,",
+        "((Flags and PTE_WRITABLE) <> 0) and",
+        "((Flags and PTE_NO_EXECUTE) = 0)",
         "Flags := PTE_USER or PTE_WRITABLE;",
         "Flags := Flags or PTE_NO_EXECUTE;",
     ))
