@@ -99,7 +99,7 @@ def main() -> int:
         "VFSIsRemoteFD", "VFSQueueRemoteClose(RemoteHandle: QWord); forward",
         "VFSQueueRemoteClose(RemoteHandle)",
     ))
-    if "if (Kind = voRemote) and (RemoteHandle <> 0) then" not in vfs:
+    if "if ((Kind = voRemote) or (Kind = voRemoteDirectory)) and" not in vfs:
         fail("Last reference to a remote description must enqueue a remote CLOSE")
     process = require(KERNEL / "mistix_process.inc", (
         "procedure VFSBrokerFlushRemoteCloses; forward", "VFSBrokerFlushRemoteCloses;",
