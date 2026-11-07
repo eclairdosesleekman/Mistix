@@ -521,7 +521,10 @@ begin
      ((VirtualAddress and (PAGE_SIZE - 1)) <> 0) then Exit;
   if (Flags and not PTE_ALLOWED_FLAGS) <> 0 then Exit;
   if (Flags and PTE_USER) = 0 then Exit;
+  if ((Flags and PTE_WRITABLE) <> 0) and
+     ((Flags and PTE_NO_EXECUTE) = 0) then Exit; { never create W+X }
   if ((Flags and PTE_NO_EXECUTE) <> 0) and not CPUHasNXSupport then Exit;
+  if (ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical then Exit;
 
   PML4 := PhysicalTablePointer(RootPhysical);
   EntryValue := PML4^[(VirtualAddress shr 39) and $1FF];
