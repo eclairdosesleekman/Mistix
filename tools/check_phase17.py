@@ -62,7 +62,7 @@ def main() -> int:
         "if (Frame^.CS and 3) = 3 then",
     ))
     require("docs/PHASE17-DESIGN.md", (
-        "FPC_DIVBYZERO", "FPC_RANGEERROR", "FPC_OVERFLOW",
+        "FPC_DIVBYZERO", "fpc_rangeerror", "FPC_RANGEERROR", "FPC_OVERFLOW",
         "201", "215", "200", "IDIV", "0x8000000000000000",
         "SysWaitPID", "make smoke BUILD_TYPE=debug",
         "not a hardware qualification",
