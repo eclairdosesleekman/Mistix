@@ -555,6 +555,8 @@ var
   Header: PElf64Header;
   ProgramHeader: PElf64ProgramHeader;
   I, J: LongWord;
+  ProgramHeaderIndexOffset: PtrUInt;
+  ProgramHeaderAddress: PtrUInt;
   SegmentEnd: QWord;
   FirstPage: QWord;
   EndPage: QWord;
@@ -615,10 +617,19 @@ begin
 {$ifdef MISTIX_DEBUG_CHECKS}
     WriteText('[DEBUG] ELF loader: phdr '); WriteDecimal(I); WriteText(#13#10);
 {$endif}
-    ProgramHeader := PElf64ProgramHeader(PtrUInt(Image) +
-      Header^.ProgramHeaderOffset + QWord(I) * SizeOf(TElf64ProgramHeader));
+    { Keep all pointer arithmetic in the native unsigned pointer type.
+      Mixing PtrUInt with ELF's QWord fields and signed SizeOf results caused
+      a checked-build range failure before the first program header was read. }
+    ProgramHeaderIndexOffset := PtrUInt(I) *
+      PtrUInt(SizeOf(TElf64ProgramHeader));
+    ProgramHeaderAddress := PtrUInt(Image);
+    Inc(ProgramHeaderAddress, PtrUInt(Header^.ProgramHeaderOffset));
+    Inc(ProgramHeaderAddress, ProgramHeaderIndexOffset);
+    ProgramHeader := PElf64ProgramHeader(Pointer(ProgramHeaderAddress));
 {$ifdef MISTIX_DEBUG_CHECKS}
-    WriteText('[DEBUG] ELF loader: phdr pointer set.'#13#10);
+    WriteText('[DEBUG] ELF loader: phdr pointer set at ');
+    WriteHex64(ProgramHeaderAddress);
+    WriteText(#13#10);
 {$endif}
     if (ProgramHeader^.SegmentType = ELF_PT_DYNAMIC) or
        (ProgramHeader^.SegmentType = ELF_PT_INTERP) or
