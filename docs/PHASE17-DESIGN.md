@@ -19,12 +19,13 @@ diagnostics and halt path.
 | Symbol | Runtime fault | Child process exit status |
 | --- | --- | ---: |
 | `fpc_rangeerror` | range-check violation | 201 |
-| `FPC_OVERFLOW` | signed integer overflow | 215 |
+| `fpc_overflow` | signed integer overflow | 215 |
 | x86 `IDIV` / `#DE` | integer division by zero | `0x8000000000000000` |
 
 The shared library also exports `FPC_DIVBYZERO` as a compatibility fallback
 (status 200), and retains uppercase `FPC_RANGEERROR` as a compatibility
-alias. The selected x86-64 FPC compiler emits native signed
+alias. The common library also exports uppercase `FPC_OVERFLOW` for ABI
+compatibility. The selected x86-64 FPC compiler emits native signed
 `IDIV`, not a call to that helper. A zero divisor therefore enters the
 kernel's user-mode exception path (vector 0), which tags the process exit
 status with the high exception bit. The kernel records that status, marks
