@@ -1233,7 +1233,7 @@ end;
 procedure MistixVFSdEntry; assembler; nostackframe; public name '_start';
 asm
   and rsp, -16
-  call mistix_user_main
+  call MistixVFSdMain
   xor edi, edi
   mov eax, 2
   int $80
