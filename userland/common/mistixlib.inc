@@ -412,7 +412,13 @@ begin
   SysExit(200);
 end;
 
-procedure MistixFPCRangeError; cdecl; public name 'FPC_RANGEERROR';
+procedure MistixFPCRangeError; cdecl; public name 'fpc_rangeerror';
+begin
+  SysExit(201);
+end;
+
+{ Keep the documented uppercase spelling as a compatibility alias. }
+procedure MistixFPCRangeErrorCompat; cdecl; public name 'FPC_RANGEERROR';
 begin
   SysExit(201);
 end;
