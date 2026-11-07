@@ -237,12 +237,12 @@ end;
 
 procedure ZeroPhysicalPage(PhysicalAddress: QWord);
 var
-  Words: PQWord;
+  Words: PPageTable;
   I: LongWord;
 begin
   Words := PQWord(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
   for I := 0 to 511 do
-    Words[I] := 0;
+    Words^[I] := 0;
 end;
 
 function AllocatePageTable(out PhysicalAddress: QWord): Boolean;
