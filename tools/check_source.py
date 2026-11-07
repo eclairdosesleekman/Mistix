@@ -69,12 +69,13 @@ def main() -> int:
         "VFS_BROKER_OPEN", "VFS_BROKER_READ", "VFS_BROKER_WRITE",
         "VFS_BROKER_CLOSE", "VFS_BROKER_SHARED_BASE", "VFS_BROKER_SHARED_SIZE",
         "AddressSpaceTranslate", "PTE_USER or PTE_WRITABLE",
-        "VFSBrokerPending.TransactionID", "VFSBrokerPending.OwnerPID",
+        "VFSBrokerPending[I].TransactionID = Message.Words[0]",
+        "VFSBrokerPending[MatchIndex].OwnerPID",
         "Message.Words[1]", "VFSBrokerFlushRemoteCloses", "VFSQueueRemoteClose",
         "RequestPath: array[0..VFS_PATH_MAX] of Char",
-        "VFSBrokerPending.RequestPath[I] <> Path[I]",
-        "VFSBrokerPending.UserBuffer <> UserBuffer",
-        "VFSBrokerPending.ByteCount <> ByteCount",
+        "VFSBrokerPending[SlotIndex].RequestPath[I] <> Path[I]",
+        "VFSBrokerPending[SlotIndex].UserBuffer <> UserBuffer",
+        "VFSBrokerPending[SlotIndex].ByteCount <> ByteCount",
         "MISTIX_SYSCALL_VFS_REGISTER:",
     ))
     for token in (
