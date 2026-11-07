@@ -64,6 +64,10 @@ def main() -> int:
     require("src/kernel/mistix_types.inc", (
         "PTE_NO_EXECUTE = not QWord($7FFFFFFFFFFFFFFF)",
     ))
+    require("src/kernel/mistix_types.inc", (
+        "LIMINE_MAX_MEMMAP_ENTRIES = 4096",
+        "TLimineMemmapEntryArray = array[0..LIMINE_MAX_MEMMAP_ENTRIES - 1] of PLimineMemmapEntry",
+    ))
     require("src/kernel/mistix_cpu.inc", (
         "{$push}",
         "{$R-} { TSS descriptor bit packing must preserve unsigned high address bits. }",
