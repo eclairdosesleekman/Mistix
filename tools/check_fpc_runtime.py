@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "tools" / "tests" / "fpc_runtime_probe.pas"
-EXPECTED_HOOKS = {"FPC_RANGEERROR", "FPC_OVERFLOW"}
+EXPECTED_HOOKS = {"fpc_rangeerror", "FPC_OVERFLOW"}
 SIGNED_DIVISION = re.compile(r"\bidiv(?:[bwlq])?\b", re.IGNORECASE)
 
 
@@ -71,7 +71,7 @@ def main() -> int:
         for line in inspected.stdout.splitlines():
             parts = line.split()
             if parts:
-                symbols.add(parts[-1].lstrip("_").upper())
+                symbols.add(parts[-1].lstrip("_"))
         missing = sorted(EXPECTED_HOOKS - symbols)
         if missing:
             print("FPC did not emit the expected freestanding runtime hooks:", file=sys.stderr)
