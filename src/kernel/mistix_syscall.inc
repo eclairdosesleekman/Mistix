@@ -193,7 +193,6 @@ end;
 
 procedure VFSBrokerInitialize; forward;
 procedure VFSBrokerPumpReplies; forward;
-procedure VFSBrokerFlushRemoteCloses; forward;
 function VFSBrokerHasActiveRequests: Boolean; forward;
 
 procedure SyscallInitialize;
