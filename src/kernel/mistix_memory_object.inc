@@ -73,7 +73,7 @@ var
   Words: PPageTable;
   I: LongWord;
 begin
-  Words := PQWord(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
+  Words := PPageTable(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
   for I := 0 to 511 do
     Words^[I] := 0;
 end;
