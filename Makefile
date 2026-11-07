@@ -231,15 +231,15 @@ run-debug: iso
 
 smoke: iso
 	@rm -f "$(SMOKE_LOG)"
-	@set +e; $(TIMEOUT) --signal=TERM $(SMOKE_TIMEOUT)s $(QEMU) -M q35 -m 256M -smp 1 -cdrom "$(ISO_IMAGE)" -boot d -display none -serial file:"$(SMOKE_LOG)" -monitor none -no-reboot >/dev/null 2>&1; status=$?; set -e; \
-	if [ $status -ne 124 ] && [ $status -ne 0 ]; then echo "QEMU exited unexpectedly (status $status)"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit $status; fi; \
+	@set +e; $(TIMEOUT) --signal=TERM $(SMOKE_TIMEOUT)s $(QEMU) -M q35 -m 256M -smp 1 -cdrom "$(ISO_IMAGE)" -boot d -display none -serial file:"$(SMOKE_LOG)" -monitor none -no-reboot >/dev/null 2>&1; qemu_status=$$?; set -e; \
+	if [ $$qemu_status -ne 124 ] && [ $$qemu_status -ne 0 ]; then echo "QEMU exited unexpectedly (status $$qemu_status)"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit $$qemu_status; fi; \
 	grep -F "[PASS] Phase 9 kernel foundations and userland VFS broker are prepared." "$(SMOKE_LOG)" >/dev/null || { echo "Kernel boot marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
-	grep -F "Starting Mistix shell." "$(SMOKE_LOG)" >/dev/null || { echo "Userland init marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
-	echo "Mistix headless QEMU boot smoke test passed."
+	grep -F "Starting Mistix shell." "$(SMOKE_LOG)" >/dev/null || { echo "Userland init marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; };
 	@if [ "$(BUILD_TYPE)" = "debug" ]; then \
 	  grep -F "[ OK ] Phase 17 runtime fault isolation tests passed." "$(SMOKE_LOG)" >/dev/null || { echo "Runtime-fault isolation marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
-  grep -F "[ OK ] Phase 18 user-mode page-fault isolation tests passed." "$(SMOKE_LOG)" >/dev/null || { echo "User page-fault isolation marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
+	  grep -F "[ OK ] Phase 18 user-mode page-fault isolation tests passed." "$(SMOKE_LOG)" >/dev/null || { echo "User page-fault isolation marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
 	fi
+	@echo "Mistix headless QEMU boot smoke test passed."
 
 debug:
 	$(MAKE) BUILD_TYPE=debug all
