@@ -33,7 +33,7 @@ def main() -> int:
         "procedure VFSBrokerTrySendCancel",
         "Message.Words[4] := SlotIndex",
         "Message.Words[5] := VFSBrokerServerGeneration",
-        "VFSBrokerPending[MatchIndex].TransactionID = Message.Words[0]",
+        "VFSBrokerPending[I].TransactionID = Message.Words[0]",
         "VFSBrokerPending[MatchIndex].ServerGeneration",
         "VFS_BROKER_ERR_TIMEOUT", "TimeoutDelivered",
         "AddressSpaceCopyTo(ServerRoot, LaneAddress + VFS_IO_MAX",
