@@ -24,9 +24,9 @@ linked image:
 | --- | --- | ---: |
 | `FPC_DIVBYZERO` | Division by zero fallback | 200 |
 | `fpc_rangeerror` | Range check failure | 201 |
-| `FPC_OVERFLOW` | Integer arithmetic overflow | 215 |
+| `fpc_overflow` | Integer arithmetic overflow | 215 |
 
-The selected x86-64 FPC compiler emits calls to the exact ELF symbols `fpc_rangeerror` and `FPC_OVERFLOW`.
+The selected x86-64 FPC toolchain uses the ELF symbols `fpc_rangeerror` and `fpc_overflow` for userland checked operations; uppercase `FPC_RANGEERROR` and `FPC_OVERFLOW` aliases remain for the compile-time probe and compatibility.
 Its signed integer division uses the native `IDIV` instruction instead of an
 undefined `FPC_DIVBYZERO` helper; a zero divisor therefore raises CPU exception
 vector 0 (`#DE`). Mistix keeps the `FPC_DIVBYZERO` entry point available as a
