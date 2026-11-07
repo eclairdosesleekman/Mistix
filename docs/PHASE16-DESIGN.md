@@ -31,7 +31,11 @@ object must reference the range/overflow helpers and retain a native signed
 1. Compiles the probe in a temporary directory.
 2. Uses GNU `nm -u` to require undefined references to:
    - `fpc_rangeerror` — Pascal range checking;
-   - `FPC_OVERFLOW` — Pascal integer-overflow checking.
+   - `FPC_OVERFLOW` — the isolated ABI probe's Pascal integer-overflow helper.
+
+Debug userland links can also request the lowercase spelling `fpc_overflow`;
+Phase 17 exports both symbol forms so differently compiled units resolve
+against the same freestanding handler.
 3. Uses GNU `objdump -d` to require a signed `IDIV` instruction.
 
 The selected x86-64 FPC compiler does not emit an undefined
