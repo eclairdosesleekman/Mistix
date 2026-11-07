@@ -64,7 +64,8 @@ def main() -> int:
     require("src/kernel/mistix_cpu.inc", (
         "jmp ISRCommon",
         "call TrapDispatch",
-        "procedure ISRCommon; assembler",
+        "function TrapDispatch(Frame: PInterruptFrame): QWord; cdecl; forward",
+        "procedure ISRCommon; assembler; nostackframe; forward",
     ))
     require("src/kernel/mistix_syscall.inc", ("jmp ISRCommon",))
     require("src/kernel/mistix_main.inc", (
