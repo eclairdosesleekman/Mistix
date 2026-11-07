@@ -297,7 +297,8 @@ function Ext2ULookupChild(const Directory: TExt2UserInode;
   const Name: array of Char; out ChildInode: LongWord): Boolean;
 var
   NameLength, BlockIndex, EntryOffset, RecordLength, EntryNameLength: LongWord;
-  LogicalBlocks, PhysicalBlock, I: QWord;
+  LogicalBlocks, I: QWord;
+  PhysicalBlock: LongWord;
   EntryInode: LongWord;
   Match: Boolean;
 begin
