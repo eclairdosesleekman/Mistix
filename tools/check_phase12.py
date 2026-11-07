@@ -28,7 +28,6 @@ def main() -> int:
         "VFSBrokerPending: array[0..VFS_BROKER_PENDING_MAX - 1]",
         "procedure SyscallInitialize;",
         "function SyscallVFSRegister(ServerPID", 
-        "procedure VFSBrokerFlushRemoteCloses; forward;",
         "function VFSBrokerHasActiveRequests",
         "procedure VFSBrokerTrySendCancel",
         "Message.Words[4] := SlotIndex",
@@ -37,6 +36,9 @@ def main() -> int:
         "VFSBrokerPending[MatchIndex].ServerGeneration",
         "VFS_BROKER_ERR_TIMEOUT", "TimeoutDelivered",
         "AddressSpaceCopyTo(ServerRoot, LaneAddress + VFS_IO_MAX",
+    ))
+    require("src/kernel/mistix_process.inc", (
+        "procedure VFSBrokerFlushRemoteCloses; forward;",
     ))
     if "VFSBrokerPending.Active" in kernel:
         raise SystemExit("legacy singleton VFS broker state remains")
