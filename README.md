@@ -36,9 +36,10 @@ window while it dispatches each request, then saves read results back to that
 lane.
 
 Replies are demultiplexed by transaction ID, owner PID and server generation.
-The kernel applies a five-second deadline, sends a best-effort CANCEL
-notification on timeout or owner exit, and ignores late replies once their
-transaction slot is retired. Cancel notification is not a preemptive abort of
+The kernel applies a five-second deadline, checked when it pumps replies on
+broker retries (there is no separate watchdog thread), sends a best-effort
+CANCEL notification on timeout or owner exit, and ignores late replies once
+their transaction slot is retired. Cancel notification is not a preemptive abort of
 a synchronous operation already executing inside vfsd; the server still
 processes requests serially.
 
