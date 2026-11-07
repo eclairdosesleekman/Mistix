@@ -51,13 +51,18 @@ def main() -> int:
         "SysSpawnPath", "SysWaitPID",
         "RuntimeRangeArgs, RuntimeRangeName, 201",
         "RuntimeOverflowArgs, RuntimeOverflowName, 215",
-        "RuntimeDivideArgs, RuntimeDivideName, 200",
+        "RuntimeDivideArgs, RuntimeDivideName, QWord($8000000000000000)",
         "MISTIX_DEBUG_CHECKS",
         "[ OK ] Phase 17 runtime fault isolation tests passed.",
     ))
+    require("src/kernel/mistix_trap.inc", (
+        "ExitCode := QWord($8000000000000000) or",
+        "ProcessTerminateCurrent(Frame, ExitCode)",
+        "if (Frame^.CS and 3) = 3 then",
+    ))
     require("docs/PHASE17-DESIGN.md", (
         "FPC_DIVBYZERO", "FPC_RANGEERROR", "FPC_OVERFLOW",
-        "201", "215", "200",
+        "201", "215", "200", "IDIV", "0x8000000000000000",
         "SysWaitPID", "make smoke BUILD_TYPE=debug",
         "not a hardware qualification",
     ))

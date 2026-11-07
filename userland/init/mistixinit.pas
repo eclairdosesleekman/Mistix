@@ -526,7 +526,8 @@ begin
   Result := False;
   if not RunRuntimeFaultCase(RuntimeRangeArgs, RuntimeRangeName, 201) then Exit;
   if not RunRuntimeFaultCase(RuntimeOverflowArgs, RuntimeOverflowName, 215) then Exit;
-  if not RunRuntimeFaultCase(RuntimeDivideArgs, RuntimeDivideName, 200) then Exit;
+  if not RunRuntimeFaultCase(RuntimeDivideArgs, RuntimeDivideName,
+       QWord($8000000000000000)) then Exit;
   WriteCString('[ OK ] Phase 17 runtime fault isolation tests passed.'#13#10);
   Result := True;
 end;

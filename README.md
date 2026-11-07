@@ -143,8 +143,8 @@ See [docs/PHASE14-DESIGN.md](docs/PHASE14-DESIGN.md) for the exact validation sc
 Phase 15 completes the runtime-checking work deferred by Phase 14:
 
 - Debug builds use FPC `-Cr -Co` and define `MISTIX_DEBUG_CHECKS`, enabling Pascal range (`{$R+}`) and integer-overflow (`{$Q+}`) checks across kernel and userland.
-- The kernel provides the compiler runtime entry points `FPC_RANGEERROR`, `FPC_OVERFLOW`, and `FPC_DIVBYZERO`. They emit a concise diagnostic on COM1 and halt without depending on the hosted RTL.
-- Userland provides the same entry points, terminating only the faulting process with the matching runtime-error status (201, 215, or 200).
+- The kernel provides freestanding range/overflow handlers and a `FPC_DIVBYZERO` compatibility entry point; they emit concise diagnostics on COM1 and halt without depending on the hosted RTL.
+- Userland exports range/overflow hooks that terminate the faulting process with statuses 201 and 215. The selected x86-64 FPC compiler implements signed divide-by-zero with native `IDIV` / CPU `#DE`, which the trap dispatcher isolates as a process exception.
 - Release builds retain the existing unchecked `{$R-}` / `{$Q-}` configuration.
 - `make phase15-check` verifies compiler flags, conditional directives, and freestanding handler wiring.
 
@@ -159,7 +159,7 @@ Phase 16 makes the Phase 15 runtime handlers a tested compiler contract:
 
 - A freestanding Pascal probe contains dynamic array indexing, signed arithmetic, and integer division operations that require runtime checks.
 - `make fpc-runtime-check` compiles that probe with the same x86-64, no-link, no-optimization, range-check, and overflow-check options as the Debug profile.
-- The validation inspects the generated object with `nm` and requires undefined references to `FPC_RANGEERROR`, `FPC_OVERFLOW`, and `FPC_DIVBYZERO`. This verifies the compiler actually emits the hooks that Mistix implements.
+- The validation inspects the generated object with `nm` and requires undefined references to `FPC_RANGEERROR` and `FPC_OVERFLOW`; GNU `objdump` also confirms that signed division is emitted as native `IDIV` (zero divisors raise CPU `#DE`).
 - The compile-only probe is kept separate from the freestanding kernel and userland images; it does not run privileged instructions or modify the guest.
 - `make phase16-check` verifies the test wiring and preserves the Phase 14 historical source-check contract.
 
@@ -171,7 +171,7 @@ Phase 17 closes the userland runtime-hook gap and exercises the process-exit pat
 
 - The shared userland library now defines `FPC_DIVBYZERO`, `FPC_RANGEERROR`, and `FPC_OVERFLOW`; each hook exits only the faulting process with the compiler's runtime error code.
 - A freestanding `/bin/runtimefault` test image can trigger range, overflow, and divide-by-zero checks from runtime-supplied values.
-- Debug init launches each case as a child, waits for it, and checks the returned status (201, 215, and 200). The test fails boot smoke if the child does not exit with its expected code or cannot be reaped.
+- Debug init launches each case as a child, waits for it, and checks the returned status (201, 215, and the vector-0 exception tag `0x8000000000000000`). The test fails boot smoke if the child does not exit with its expected code or cannot be reaped.
 - Release does not run deliberate fault cases. The new Debug smoke assertion requires the Phase 17 success marker.
 
 Run `make phase17-check` for host-only source-contract validation. `make smoke BUILD_TYPE=debug` builds the image and requires all three guest-side fault tests to pass under QEMU. This is targeted process-isolation coverage, not an exhaustive fault or hardware-validation suite.

@@ -18,14 +18,17 @@ diagnostics and halt path.
 
 | Symbol | Runtime fault | Child process exit status |
 | --- | --- | ---: |
-| `FPC_DIVBYZERO` | integer division by zero | 200 |
 | `FPC_RANGEERROR` | range-check violation | 201 |
 | `FPC_OVERFLOW` | signed integer overflow | 215 |
+| x86 `IDIV` / `#DE` | integer division by zero | `0x8000000000000000` |
 
-Each no-argument FPC entry point calls the existing `SysExit` syscall wrapper.
-The kernel records the status, marks only the calling process as a zombie,
-wakes its waiting parent, and reaps the child after the status has been copied
-out. No hosted RTL is linked.
+The shared library also exports `FPC_DIVBYZERO` as a compatibility fallback
+(status 200), but the selected x86-64 FPC compiler emits native signed
+`IDIV`, not a call to that helper. A zero divisor therefore enters the
+kernel's user-mode exception path (vector 0), which tags the process exit
+status with the high exception bit. The kernel records that status, marks
+only the faulting process as a zombie, wakes its waiting parent, and reaps
+the child after the status has been copied out. No hosted RTL is linked.
 
 ## Guest-side probe
 
@@ -50,7 +53,7 @@ launching the interactive shell. For each case it:
 
 1. spawns `/bin/runtimefault` with the relevant mode;
 2. blocks in `SysWaitPID` until that exact child terminates;
-3. verifies the returned PID and status (201, 215, or 200);
+3. verifies the returned PID and status (201, 215, or the vector-0 exception tag `0x8000000000000000`);
 4. proceeds to the next case only after successful reaping.
 
 A failure emits a serial `[FAIL]` marker and exits init nonzero. After all
@@ -75,6 +78,9 @@ to pass the new test. Release does not execute deliberate faults.
 
 - These cases validate the userland compiler hooks and child process exit /
   wait / reap path. They do not exercise the kernel's fatal runtime handlers.
+- The divide-by-zero case validates native `IDIV` / CPU `#DE` delivery and
+  user-process termination; it does not call the compatibility-only
+  `FPC_DIVBYZERO` wrapper on the selected compiler.
 - The tests are deterministic probes, not fuzzing or exhaustive arithmetic
   coverage.
 - A passing QEMU smoke test is not a hardware qualification or a general
