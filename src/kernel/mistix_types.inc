@@ -1,3 +1,6 @@
+const
+  LIMINE_MAX_MEMMAP_ENTRIES = 4096;
+
 type
   TUInt64 = QWord;
   PQWord = ^QWord;
@@ -12,7 +15,7 @@ type
     EntryType: TUInt64;
   end;
 
-  TLimineMemmapEntryArray = array[0..0] of PLimineMemmapEntry;
+  TLimineMemmapEntryArray = array[0..LIMINE_MAX_MEMMAP_ENTRIES - 1] of PLimineMemmapEntry;
 
   TLimineMemmapResponse = record
     Revision: TUInt64;
@@ -87,7 +90,6 @@ const
   LIMINE_MEMMAP_USABLE = 0;
   LIMINE_BASE_REVISION = 6;
   LIMINE_PAGING_MODE_X86_64_4LVL = 0;
-  LIMINE_MAX_MEMMAP_ENTRIES = 4096;
 
   PAGE_SIZE = 4096;
   PAGE_MASK = $FFFFFFFFFFFFF000;
