@@ -42,6 +42,7 @@ def main() -> int:
         "public name 'FPC_RANGEERROR'",
         "public name 'fpc_rangeerror'",
         "public name 'FPC_OVERFLOW'",
+        "public name 'fpc_overflow'",
         "public name 'FPC_DIVBYZERO'",
         "MistixRuntimePanic(201)",
         "MistixRuntimePanic(215)",
@@ -57,6 +58,7 @@ def main() -> int:
         "public name 'FPC_RANGEERROR'",
         "public name 'fpc_rangeerror'",
         "public name 'FPC_OVERFLOW'",
+        "public name 'fpc_overflow'",
         "SysExit(200)", "SysExit(201)", "SysExit(215)",
         "mov eax, MISTIX_SYSCALL_EXIT", "int $80", "ud2",
     ))
