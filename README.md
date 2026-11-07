@@ -119,7 +119,7 @@ Phase 14 adds repeatable host-side validation without changing the kernel ABI:
 - A headless QEMU boot smoke test that checks kernel and init serial markers.
 - GitHub Actions on pull requests and pushes to `main`, with a pinned Limine v12.9.6 release and retained build logs.
 
-Debug mode currently adds symbols only. It does not enable Pascal range or overflow checks because the freestanding programs do not yet supply the runtime error handlers those switches may need.
+Debug mode uses FPC debug information (`-g`) only. It avoids `-gl`, which implicitly links the LineInfo RTL unit, and does not enable Pascal range or overflow checks because the freestanding programs do not yet supply the runtime error handlers those switches may need.
 
 Run the host-side checks and profiles with:
 
