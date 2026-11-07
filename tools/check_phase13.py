@@ -27,7 +27,7 @@ def main() -> int:
         "VFSBrokerCall(CurrentProcessIndex, VFS_BROKER_OP_SEEK",
         "MISTIX_SYSCALL_LSEEK:",
         "VFS_BROKER_OP_SEEK: Message.MessageId := VFS_BROKER_SEEK",
-        "VFS_BROKER_OP_SEEK: Result := Payload",
+        "Result := Payload",
         "VFSBrokerScratch[I] := Byte(UserBuffer shr (I * 8))",
     ))
     require("src/kernel/mistix_vfs.inc", (
