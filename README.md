@@ -86,110 +86,6 @@ Current behavior is mixed by design:
 - `getcwd()` still reads the kernel's per-process current-directory cache.
 - Device nodes, pipes, and directory operations outside the supported Ext2 path retain kernel-side handling.
 
-#### Phase 11 — Userland Ext2 directory descriptors
-
-Phase 11 added remote directory descriptors for the read-only Ext2 namespace under `/mnt/disk`. Directory enumeration is bounded (up to 16 entries per request, with a 128-entry visible-directory limit in the current Ext2 client). The kernel validates returned entries before copying them to user memory. The current-directory cache remains kernel-owned and is updated after a successful remote `chdir`.
-
-See [docs/PHASE11-DESIGN.md](docs/PHASE11-DESIGN.md) and run `make phase11-check` for the source-contract check.
-
-#### Phase 12 — Multi-request VFS broker
-
-Phase 12 replaced the original single-request broker record with a bounded table for **eight outstanding transactions**. The 64 KiB shared region is divided into eight private 8 KiB request lanes. Replies are correlated by transaction ID, owner PID, and VFS server generation.
-
-The broker assigns a **five-second deadline** and sends best-effort cancellation notifications. Cancellation cannot interrupt a synchronous filesystem operation that the single-threaded `vfsd` is already processing; the broker has **no separate watchdog thread**. The request table allows multiple callers to wait safely, but it does not make filesystem operations execute in parallel.
-
-See [docs/PHASE12-DESIGN.md](docs/PHASE12-DESIGN.md) and run `make phase12-check`.
-
-#### Phase 13 — Remote and local file seeking
-
-Phase 13 adds syscall 32, `lseek(fd, offset, whence)`, and the `SysLseek` Pascal wrapper. Both kernel-local and remote regular-file descriptions support `SEEK_SET`, `SEEK_CUR`, and `SEEK_END`. The signed 64-bit offset is staged in the request's private 8 KiB lane for remote seeks, and the server-side open description owns the shared cursor.
-
-Pipes and stream devices are not seekable; remote directory descriptors are also not seekable in this phase.
-
-See [docs/PHASE13-DESIGN.md](docs/PHASE13-DESIGN.md) and run `make phase13-check`.
-
-## Phase 14 — Build and test infrastructure
-
-Phase 14 adds repeatable host-side validation without changing the kernel ABI:
-
-- Separate `build/release/` and `build/debug/` output trees.
-- Debug symbols in the debug profile; both profiles keep `-O-` until optimization is measured.
-- Static Phase 10–14 source checks and Python tooling tests.
-- MFS1 image-builder integration tests for binary layout, empty files, duplicate paths, and non-canonical paths.
-- A headless QEMU boot smoke test that checks kernel and init serial markers.
-- GitHub Actions on pull requests and pushes to `main`, with a pinned Limine v12.9.6 release and retained build logs.
-
-Debug mode keeps FPC debug information (`-g`) without `-gl`. Phase 15 adds range and integer-overflow checks to Debug builds using Mistix-owned freestanding runtime handlers; Release builds keep those checks disabled.
-
-Run the host-side checks and profiles with:
-
-```sh
-make test
-make release
-make debug
-```
-
-With Limine v12 available at `../limine`, `xorriso`, QEMU, and GNU `timeout` installed, run the headless boot check with:
-
-```sh
-make smoke
-```
-
-See [docs/PHASE14-DESIGN.md](docs/PHASE14-DESIGN.md) for the exact validation scope and limitations. The smoke test is a BIOS/QEMU bring-up check, not a complete userland test, SMP test, UEFI qualification, or real-hardware certification.
-
-
-## Phase 15 — Freestanding runtime diagnostics
-
-Phase 15 completes the runtime-checking work deferred by Phase 14:
-
-- Debug builds use FPC `-Cr -Co` and define `MISTIX_DEBUG_CHECKS`, enabling Pascal range (`{$R+}`) and integer-overflow (`{$Q+}`) checks across kernel and userland.
-- The kernel provides freestanding range/overflow handlers and a `FPC_DIVBYZERO` compatibility entry point; they emit concise diagnostics on COM1 and halt without depending on the hosted RTL.
-- Userland exports the compiler's lowercase `fpc_rangeerror` and `fpc_overflow` hooks (plus uppercase compatibility aliases) that terminate the faulting process with statuses 201 and 215. The selected x86-64 FPC compiler implements signed divide-by-zero with native `IDIV` / CPU `#DE`, which the trap dispatcher isolates as a process exception.
-- Release builds retain the existing unchecked `{$R-}` / `{$Q-}` configuration.
-- `make phase15-check` verifies compiler flags, conditional directives, and freestanding handler wiring.
-
-The handlers intentionally do not enable stack checking, I/O checking, exceptions, floating-point traps, or FPC line-info support. They are minimal fatal paths, not a replacement for the full Free Pascal RTL.
-
-See [docs/PHASE15-DESIGN.md](docs/PHASE15-DESIGN.md) for ABI details and validation scope.
-
-
-## Phase 16 — FPC runtime-check ABI verification
-
-Phase 16 makes the Phase 15 runtime handlers a tested compiler contract:
-
-- A freestanding Pascal probe contains dynamic array indexing, signed arithmetic, and integer division operations that require runtime checks.
-- `make fpc-runtime-check` compiles that probe with the same x86-64, no-link, no-optimization, range-check, and overflow-check options as the Debug profile.
-- The validation inspects the generated object with `nm` and requires undefined references to `FPC_RANGEERROR` and `FPC_OVERFLOW`; GNU `objdump` also confirms that signed division is emitted as native `IDIV` (zero divisors raise CPU `#DE`).
-- The compile-only probe is kept separate from the freestanding kernel and userland images; it does not run privileged instructions or modify the guest.
-- `make phase16-check` verifies the test wiring and preserves the Phase 14 historical source-check contract.
-
-Run `make fpc-runtime-check` on a host with FPC and GNU `nm` installed. CI runs it before the full Release/Debug builds and QEMU smoke tests.
-
-## Phase 17 — runtime fault isolation
-
-Phase 17 closes the userland runtime-hook gap and exercises the process-exit path end to end:
-
-- The shared userland library now defines `FPC_DIVBYZERO`, `FPC_RANGEERROR`, and `FPC_OVERFLOW`; each hook exits only the faulting process with the compiler's runtime error code.
-- A freestanding `/bin/runtimefault` test image can trigger range, native-width (`Int64`) overflow, and divide-by-zero checks from runtime-supplied values.
-- Debug init launches each case as a child, waits for it, and checks the returned status (201, 215, and the vector-0 exception tag `0x8000000000000000`). The test fails boot smoke if the child does not exit with its expected code or cannot be reaped.
-- Release does not run deliberate fault cases. The new Debug smoke assertion requires the Phase 17 success marker.
-
-Run `make phase17-check` for host-only source-contract validation. `make smoke BUILD_TYPE=debug` builds the image and requires all three guest-side fault tests to pass under QEMU. This is targeted process-isolation coverage, not an exhaustive fault or hardware-validation suite.
-
-## Phase 18 — user-mode page-fault isolation
-
-Phase 18 extends the Debug-only child-process fault suite from compiler runtime errors to x86-64 page protection:
-
-- An unmapped user page is read and written in separate child processes.
-- ELF pages are initialized in an inactive address space through a writable/NX staging mapping, then receive their final W^X/NX permissions.
-- A child attempts to write into its read-only executable text page.
-- A child writes a `RET` byte to its stack and attempts to execute it, checking the stack's NX mapping.
-- PID 1 waits for each child and checks the exact vector-14 status, including the page-fault P/W/U/I-D error bits. A normal return is treated as a test failure.
-
-The Debug smoke target requires both the Phase 17 runtime-check marker and the new Phase 18 page-fault marker. Release does not execute deliberate faults. Run `make phase18-check` for host-only source-contract validation. The tests cover these four controlled cases; they are not exhaustive MMU testing or hardware qualification.
-
-The phase notes distinguish source-contract checks from **FPC  real compilation** and QEMU runtime validation; static checks alone do not prove the kernel boots.
-
 ## Networking
 
 The current network implementation is a protocol/parser and software-loopback experiment:
@@ -251,21 +147,11 @@ The debug target starts QEMU with `-s -S`.
 
 ```sh
 make check-source
-make phase10-check
-make phase11-check
-make phase12-check
-make phase13-check
-make phase14-check
-make phase15-check
-make phase16-check
-make phase17-check
 make fpc-runtime-check
 make test
 ```
 
 These Python checks verify selected source structure, ABI constants, and wiring between the kernel and userland services. They are **static checks**, not runtime tests.
-
-The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
 
 ## Repository layout
 
