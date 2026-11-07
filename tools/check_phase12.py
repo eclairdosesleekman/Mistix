@@ -26,6 +26,9 @@ def main() -> int:
         "VFS_BROKER_CANCEL_GRACE_TICKS = 1000",
         "VFSBrokerServerGeneration",
         "VFSBrokerPending: array[0..VFS_BROKER_PENDING_MAX - 1]",
+        "procedure SyscallInitialize;",
+        "function SyscallVFSRegister(ServerPID", 
+        "procedure VFSBrokerFlushRemoteCloses; forward;",
         "function VFSBrokerHasActiveRequests",
         "procedure VFSBrokerTrySendCancel",
         "Message.Words[4] := SlotIndex",
@@ -60,7 +63,7 @@ def main() -> int:
     require("README.md", (
         "Phase 12 — Multi-request VFS broker",
         "eight outstanding transactions",
-        "five-second deadline",
+        "five-second deadline", "no separate watchdog thread",
     ))
     require("docs/PHASE12-DESIGN.md", (
         "eight outstanding transactions",
