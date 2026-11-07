@@ -24,12 +24,19 @@ var
   Numerator: LongInt;
   Denominator: LongInt;
   DivisionResult: LongInt;
+  ReadProbeByte: Byte;
+
+procedure ExecuteProbeAddress(Address: PtrUInt); cdecl; assembler; nostackframe;
+asm
+  call rdi
+end;
 
 procedure MistixRuntimeFaultMain; cdecl; public name 'mistix_user_main';
 var
   Mode: array[0..15] of Char;
   I: LongWord;
   CommandLength: QWord;
+  CodeByte: Byte;
 begin
   for I := 0 to High(Mode) do
     Mode[I] := #0;
@@ -54,6 +61,22 @@ begin
         Numerator := Ord(Mode[1]);
         Denominator := Ord(Mode[2]) - Ord(Mode[2]);
         DivisionResult := Numerator div Denominator;
+      end;
+    'p':
+      case Mode[1] of
+        'r':
+          ReadProbeByte := PByte(PtrUInt($0000600000000000))^;
+        'w':
+          PByte(PtrUInt($0000600000000000))^ := $A5;
+        't':
+          PByte(PtrUInt(@MistixRuntimeFaultMain))^ := $90;
+        'x':
+          begin
+            CodeByte := $C3;
+            ExecuteProbeAddress(PtrUInt(@CodeByte));
+          end;
+      else
+        SysExit(2);
       end;
   else
     SysExit(2);
