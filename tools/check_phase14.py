@@ -54,7 +54,7 @@ def main() -> int:
         "test_builds_exact_mfs1_layout",
         "test_rejects_duplicate_guest_paths",
         "test_rejects_noncanonical_guest_paths",
-        "b\\"MFS1\\"",
+        'b"MFS1"',
     ))
     require("docs/PHASE14-DESIGN.md", (
         "Debug and release profiles",
