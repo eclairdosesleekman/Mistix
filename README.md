@@ -108,6 +108,35 @@ Pipes and stream devices are not seekable; remote directory descriptors are also
 
 See [docs/PHASE13-DESIGN.md](docs/PHASE13-DESIGN.md) and run `make phase13-check`.
 
+## Phase 14 — Build and test infrastructure
+
+Phase 14 adds repeatable host-side validation without changing the kernel ABI:
+
+- Separate `build/release/` and `build/debug/` output trees.
+- Debug symbols in the debug profile; both profiles keep `-O-` until optimization is measured.
+- Static Phase 10–14 source checks and Python tooling tests.
+- MFS1 image-builder integration tests for binary layout, empty files, duplicate paths, and non-canonical paths.
+- A headless QEMU boot smoke test that checks kernel and init serial markers.
+- GitHub Actions on pull requests and pushes to `main`, with a pinned Limine v12.9.6 release and retained build logs.
+
+Debug mode currently adds symbols only. It does not enable Pascal range or overflow checks because the freestanding programs do not yet supply the runtime error handlers those switches may need.
+
+Run the host-side checks and profiles with:
+
+```sh
+make test
+make release
+make debug
+```
+
+With Limine v12 available at `../limine`, `xorriso`, QEMU, and GNU `timeout` installed, run the headless boot check with:
+
+```sh
+make smoke
+```
+
+See [docs/PHASE14-DESIGN.md](docs/PHASE14-DESIGN.md) for the exact validation scope and limitations. The smoke test is a BIOS/QEMU bring-up check, not a complete userland test, SMP test, UEFI qualification, or real-hardware certification.
+
 ## Networking
 
 The current network implementation is a protocol/parser and software-loopback experiment:
@@ -173,6 +202,8 @@ make phase10-check
 make phase11-check
 make phase12-check
 make phase13-check
+make phase14-check
+make test
 ```
 
 These Python checks verify selected source structure, ABI constants, and wiring between the kernel and userland services. They are **static checks**, not runtime tests.
@@ -217,8 +248,9 @@ The design notes are the best place to find the detailed invariants and limitati
 - [Phase 11 — Ext2 directory descriptors](docs/PHASE11-DESIGN.md)
 - [Phase 12 — Multi-request VFS broker](docs/PHASE12-DESIGN.md)
 - [Phase 13 — File seeking](docs/PHASE13-DESIGN.md)
+- [Phase 14 — Build, test, and boot validation](docs/PHASE14-DESIGN.md)
 
-Some legacy serial-output text and the generated ISO filename still use a Phase 9 label; the source and design notes describe later Phase 11–13 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
+Some legacy serial-output text still uses a Phase 9 label; the source and design notes describe later Phase 11–14 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
 
 ## License
 
