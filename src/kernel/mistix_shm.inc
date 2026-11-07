@@ -109,7 +109,7 @@ begin
       Result := QWord(-12);
       Exit;
     end;
-    Words := PQWord(PtrUInt(MemoryHHDMOffset + Physical[I]));
+    Words := PPageTable(PtrUInt(MemoryHHDMOffset + Physical[I]));
     for J := 0 to 511 do Words^[J] := 0;
   end;
 
