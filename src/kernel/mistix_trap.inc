@@ -20,6 +20,7 @@ begin
   begin
     TimerPicAcknowledge;
     Inc(TimerTickCount);
+    Inc(VFSBrokerTickCounter);
     if ((Frame^.CS and 3) = 3) and
        (CurrentProcessIndex < PROCESS_MAX_COUNT) and
        ((TimerTickCount mod 3) = 0) then

@@ -24,3 +24,24 @@ The broker still permits one outstanding transaction. `getcwd()` continues
 to read the kernel's confirmed per-process cwd cache. Ext2 directory parsing
 is bounded to 128 visible entries and repeated for each batch. FPC
 compilation, ISO generation and QEMU runtime testing have not been run.
+
+
+## Phase 12 — Multi-request VFS broker
+
+Phase 12 expands the kernel broker to eight outstanding transactions. Each
+request owns an 8 KiB lane in the 64 KiB shared-memory region, so queued
+READ/WRITE and directory operations do not overwrite another request's
+arguments or transfer data. The vfsd stages one lane into the legacy shared
+window while it dispatches each request, then saves read results back to that
+lane.
+
+Replies are demultiplexed by transaction ID, owner PID and server generation.
+The kernel applies a five-second deadline, checked when it pumps replies on
+broker retries (there is no separate watchdog thread), sends a best-effort
+CANCEL notification on timeout or owner exit, and ignores late replies once
+their transaction slot is retired. Cancel notification is not a preemptive abort of
+a synchronous operation already executing inside vfsd; the server still
+processes requests serially.
+
+Run `make phase12-check` for static source-contract checks. FPC compilation,
+ISO generation and QEMU runtime testing have not been run.
