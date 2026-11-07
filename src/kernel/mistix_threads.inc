@@ -110,13 +110,13 @@ begin
     StackWords := PQWord(PtrUInt(InitialSP));
 
     { ContextSwitch pops r15,r14,r13,r12,rbp,rbx and RETs to bootstrap. }
-    StackWords^[0] := 0; { r15 }
-    StackWords^[1] := 0; { r14 }
-    StackWords^[2] := 0; { r13 }
-    StackWords^[3] := 0; { r12 }
-    StackWords^[4] := 0; { rbp }
-    StackWords^[5] := 0; { rbx }
-    StackWords^[6] := PtrUInt(@ThreadBootstrap);
+    StackWords[0] := 0; { r15 }
+    StackWords[1] := 0; { r14 }
+    StackWords[2] := 0; { r13 }
+    StackWords[3] := 0; { r12 }
+    StackWords[4] := 0; { rbp }
+    StackWords[5] := 0; { rbx }
+    StackWords[6] := PtrUInt(@ThreadBootstrap);
 
     ThreadTable[I].Id := NextThreadId;
     Inc(NextThreadId);
