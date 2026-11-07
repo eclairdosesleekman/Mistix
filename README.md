@@ -1,7 +1,7 @@
 # Mistix 
 
 Mistix is UNIX-like microkernel OS that is written by Pascal from scratch.
-Pascal is easy and secure than C, Mistix aim for readable source code and security.
+Pascal is easy and secure than C, Mistix aim for general-purpose OS, focus on readable source code and usefulness.
 
 
 ## Phase 11 — Userland Ext2 directory descriptors
