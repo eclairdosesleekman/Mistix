@@ -1,0 +1,16 @@
+# Generated kernel, userland, filesystem and ISO build outputs.
+/build/
+*.o
+*.ppu
+*.elf
+*.iso
+*.img
+
+# Python test and bytecode artifacts.
+__pycache__/
+*.py[cod]
+
+# Local editor and operating-system files.
+.DS_Store
+.idea/
+.vscode/
