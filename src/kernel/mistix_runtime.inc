@@ -148,7 +148,13 @@ begin
   MistixRuntimePanic(201);
 end;
 
-procedure MistixFPCOverflow; cdecl; public name 'FPC_OVERFLOW';
+procedure MistixFPCOverflow; cdecl; public name 'fpc_overflow';
+begin
+  MistixRuntimePanic(215);
+end;
+
+{ Preserve the uppercase runtime ABI spelling for compatibility. }
+procedure MistixFPCOverflowCompat; cdecl; public name 'FPC_OVERFLOW';
 begin
   MistixRuntimePanic(215);
 end;
