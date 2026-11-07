@@ -63,6 +63,11 @@ cannot be waited for, or is not reaped makes the Debug init test fail. The
 existing Phase 17 runtime-check cases remain in the same suite and retain
 their own pass marker.
 
+These target pages are ordinary user mappings, not COW mappings. The trap
+dispatcher still gives the existing COW handler first opportunity to resolve
+a genuine copy-on-write fault; the four Phase 18 permission/missing-page cases
+must fall through to user-process termination.
+
 ## Validation
 
 - `make phase18-check` performs host-only source-contract checks for all four
@@ -81,8 +86,8 @@ separate validation levels.
 
 ## Scope and limitations
 
-- These are four deterministic user-mode probes, not fuzzing or exhaustive
-  page-table/MMU coverage.
+- These are four deterministic user-mode probes, not fuzzing. This is not
+  exhaustive MMU testing or exhaustive page-table coverage.
 - They validate the user-process exception path and parent wait/reap behavior;
   kernel-mode page faults remain fatal.
 - They do not test SMP/TLB shootdowns, demand paging, stack growth, guard-page
