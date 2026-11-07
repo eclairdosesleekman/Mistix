@@ -61,6 +61,22 @@ def main() -> int:
         "ProcessTerminateCurrent(Frame, ExitCode)",
         "if (Frame^.CS and 3) = 3 then",
     ))
+    require("userland/init/mistixinit.pas", (
+        "VFS_RPC_READDIR = $4D5653460000000A",
+        "call MistixInitMain",
+    ))
+    for source, entry in (
+        ("userland/sh/mistixsh.pas", "MistixShellMain"),
+        ("userland/bin/mistixls.pas", "MistixLSMain"),
+        ("userland/bin/mistixcat.pas", "MistixCatMain"),
+        ("userland/bin/mistixecho.pas", "MistixEchoMain"),
+        ("userland/vfs/mistixvfsd.pas", "MistixVFSdMain"),
+        ("userland/block/mistixblockd.pas", "MistixBlockdMain"),
+        ("userland/device/mistixdevd.pas", "MistixDevdMain"),
+        ("userland/network/mistixnetd.pas", "MistixNetdMain"),
+        ("userland/tests/mistixruntimefault.pas", "MistixRuntimeFaultMain"),
+    ):
+        require(source, (f"call {entry}",))
     require("docs/PHASE17-DESIGN.md", (
         "FPC_DIVBYZERO", "fpc_rangeerror", "FPC_RANGEERROR", "FPC_OVERFLOW",
         "201", "215", "200", "IDIV", "0x8000000000000000",
