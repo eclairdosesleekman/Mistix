@@ -60,7 +60,7 @@ def main() -> int:
         "ProcessTerminateCurrent(Frame, ExitCode)",
     ))
     require("src/kernel/mistix_address_space.inc", (
-        "if (Flags and (ELF_PF_WRITE or ELF_PF_EXECUTE)) =",
+        "ProgramHeader^.Flags and (ELF_PF_WRITE or ELF_PF_EXECUTE)",
         "PageFlags := PTE_USER;",
         "PageFlags := PageFlags or PTE_WRITABLE;",
         "PageFlags := PageFlags or PTE_NO_EXECUTE;",
