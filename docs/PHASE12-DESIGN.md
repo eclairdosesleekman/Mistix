@@ -41,8 +41,11 @@ cannot complete a new request.
 ## Timeout and cancellation
 
 The kernel uses PIT ticks at 100 Hz and assigns a 500-tick (five-second)
-deadline to each transaction. An expired request returns `ETIMEDOUT` to its
-caller and sends a Phase 10 CANCEL notification. Cancelled entries are kept
+deadline to each transaction. The broker checks expired deadlines while it
+pumps replies on caller retry; there is no separate watchdog thread. A client
+wrapper that retries after `EAGAIN` and yields therefore observes
+`ETIMEDOUT` once its next broker poll notices the expired deadline. The
+kernel then sends a Phase 10 CANCEL notification. Cancelled entries are kept
 briefly as tombstones so a late successful OPEN can have its remote handle
 closed and a late response cannot be mistaken for a new transaction. The
 tombstone is retired after a matching response/acknowledgement or a bounded
