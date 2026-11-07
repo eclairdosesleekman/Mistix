@@ -1,0 +1,96 @@
+name: Mistix CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mistix-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-and-boot:
+    name: Build, test, and boot (x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build and emulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils \
+            ca-certificates \
+            curl \
+            fp-compiler \
+            fp-units-base \
+            fp-units-fcl \
+            gcc \
+            make \
+            mtools \
+            nasm \
+            python3 \
+            qemu-system-x86 \
+            xorriso
+
+      - name: Install pinned Limine v12.9.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/limine-binary.tar.gz"
+          unpack="$RUNNER_TEMP/limine-binary"
+          mkdir -p "$unpack"
+          curl --fail --location --silent --show-error \
+            https://github.com/Limine-Bootloader/Limine/releases/download/v12.9.6/limine-binary.tar.gz \
+            --output "$archive"
+          echo "b38aabb042b0c0f9f562b7741be3c1204838d7bbacfa78bb411c674bd5b984ee  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$unpack"
+
+          makefile="$(find "$unpack" -maxdepth 3 -type f -name Makefile -print -quit)"
+          test -n "$makefile"
+          limine_source_dir="$(dirname "$makefile")"
+          make -C "$limine_source_dir"
+
+          limine_tool="$(find "$unpack" -type f -name limine -perm -u+x -print -quit)"
+          test -n "$limine_tool"
+          mkdir -p ../limine/bin
+          install -m 0755 "$limine_tool" ../limine/bin/limine
+
+          for asset in limine-bios.sys limine-bios-cd.bin limine-uefi-cd.bin BOOTX64.EFI; do
+            source="$(find "$unpack" -type f -name "$asset" -print -quit)"
+            test -n "$source"
+            install -m 0644 "$source" "../limine/bin/$asset"
+          done
+
+      - name: Run source-contract and host-tool tests
+        run: make test
+
+      - name: Build release profile
+        run: make release
+
+      - name: Build debug profile
+        run: make debug
+
+      - name: Build ISO and boot it in QEMU
+        run: make smoke SMOKE_TIMEOUT=45
+
+      - name: Preserve build and serial-log artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mistix-ci-x86_64
+          if-no-files-found: warn
+          path: |
+            build/release/kernel.elf
+            build/release/mistix.iso
+            build/release/qemu-serial.log
+            build/debug/kernel.elf

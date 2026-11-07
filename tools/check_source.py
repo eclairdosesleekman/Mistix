@@ -69,12 +69,13 @@ def main() -> int:
         "VFS_BROKER_OPEN", "VFS_BROKER_READ", "VFS_BROKER_WRITE",
         "VFS_BROKER_CLOSE", "VFS_BROKER_SHARED_BASE", "VFS_BROKER_SHARED_SIZE",
         "AddressSpaceTranslate", "PTE_USER or PTE_WRITABLE",
-        "VFSBrokerPending.TransactionID", "VFSBrokerPending.OwnerPID",
+        "VFSBrokerPending[I].TransactionID = Message.Words[0]",
+        "VFSBrokerPending[MatchIndex].OwnerPID",
         "Message.Words[1]", "VFSBrokerFlushRemoteCloses", "VFSQueueRemoteClose",
         "RequestPath: array[0..VFS_PATH_MAX] of Char",
-        "VFSBrokerPending.RequestPath[I] <> Path[I]",
-        "VFSBrokerPending.UserBuffer <> UserBuffer",
-        "VFSBrokerPending.ByteCount <> ByteCount",
+        "VFSBrokerPending[SlotIndex].RequestPath[I] <> Path[I]",
+        "VFSBrokerPending[SlotIndex].UserBuffer <> UserBuffer",
+        "VFSBrokerPending[SlotIndex].ByteCount <> ByteCount",
         "MISTIX_SYSCALL_VFS_REGISTER:",
     ))
     for token in (
@@ -98,7 +99,7 @@ def main() -> int:
         "VFSIsRemoteFD", "VFSQueueRemoteClose(RemoteHandle: QWord); forward",
         "VFSQueueRemoteClose(RemoteHandle)",
     ))
-    if "if (Kind = voRemote) and (RemoteHandle <> 0) then" not in vfs:
+    if "if ((Kind = voRemote) or (Kind = voRemoteDirectory)) and" not in vfs:
         fail("Last reference to a remote description must enqueue a remote CLOSE")
     process = require(KERNEL / "mistix_process.inc", (
         "procedure VFSBrokerFlushRemoteCloses; forward", "VFSBrokerFlushRemoteCloses;",
@@ -186,7 +187,7 @@ def main() -> int:
         fail("blockd must start before vfsd")
 
     makefile = require(ROOT / "Makefile", (
-        "mistix-phase9.iso", "mistix_vfs.inc", "mistix_syscall.inc",
+        "mistix.iso", "mistix_vfs.inc", "mistix_syscall.inc",
         "vfsd.elf", "blockd.elf", "userland/vfs/mistix_ext2_client.inc",
         "Mistix Phase 9", "$(QEMU) -M pc",
     ))
