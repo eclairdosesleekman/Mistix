@@ -137,7 +137,13 @@ asm
   jmp @halt_forever
 end;
 
-procedure MistixFPCRangeError; cdecl; public name 'FPC_RANGEERROR';
+procedure MistixFPCRangeError; cdecl; public name 'fpc_rangeerror';
+begin
+  MistixRuntimePanic(201);
+end;
+
+{ Keep the documented uppercase spelling as a compatibility alias. }
+procedure MistixFPCRangeErrorCompat; cdecl; public name 'FPC_RANGEERROR';
 begin
   MistixRuntimePanic(201);
 end;
