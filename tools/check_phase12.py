@@ -32,7 +32,7 @@ def main() -> int:
         "Message.Words[5] := VFSBrokerServerGeneration",
         "VFSBrokerPending[MatchIndex].TransactionID = Message.Words[0]",
         "VFSBrokerPending[MatchIndex].ServerGeneration",
-        "VFS_BROKER_ERR_TIMEOUT",
+        "VFS_BROKER_ERR_TIMEOUT", "TimeoutDelivered",
         "AddressSpaceCopyTo(ServerRoot, LaneAddress + VFS_IO_MAX",
     ))
     if "VFSBrokerPending.Active" in kernel:
@@ -64,7 +64,7 @@ def main() -> int:
     ))
     require("docs/PHASE12-DESIGN.md", (
         "eight outstanding transactions",
-        "Server generations",
+        "server generations",
         "CANCEL is best-effort",
         "single-threaded service",
         "grace period",
