@@ -21,7 +21,7 @@ def require(path: str, tokens: tuple[str, ...]) -> str:
 def main() -> int:
     makefile = require("Makefile", (
         "BUILD_TYPE ?= release",
-        "FPC_DIAGNOSTIC_FLAGS ?= -g -gl",
+        "FPC_DIAGNOSTIC_FLAGS ?= -g",
         "BUILD_DIR ?= build/$(BUILD_TYPE)",
         "check-build-tools:",
         "check-python:",
