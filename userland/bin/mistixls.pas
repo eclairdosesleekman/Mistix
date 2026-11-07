@@ -11,6 +11,9 @@ interface
 implementation
 {$I mistixlib.inc}
 
+const
+  NewLine: array[0..1] of Char = (#13, #10);
+
 procedure MistixLSMain; cdecl; public name 'mistix_user_main';
 var
   Args: array[0..127] of Char;
