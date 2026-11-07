@@ -16,7 +16,7 @@ implementation
 
 const
   Prompt: array[0..8] of Char = 'Mistix> '#0;
-  HelpText: array[0..62] of Char = (66, 117, 105, 108, 116, 105, 110, 115, 58, 32, 104, 101, 108, 112, 44, 32, 99, 100, 32, 80, 65, 84, 72, 44, 32, 112, 119, 100, 44, 32, 101, 120, 105, 116, 46, 32, 67, 111, 109, 109, 97, 110, 100, 115, 58, 32, 108, 115, 44, 32, 99, 97, 116, 44, 32, 101, 99, 104, 111, 46, 13, 10, 0);
+  HelpText: array[0..62] of Char = 'Builtins: help, cd PATH, pwd, exit. Commands: ls, cat, echo.'#13#10#0;
   NewLine: array[0..1] of Char = (#13,#10);
   BackspaceSequence: array[0..2] of Byte = (8,32,8);
 
