@@ -118,6 +118,8 @@ const
     '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
   );
 
+{$push}
+{$R-}
 var
   LimineRequests: TLimineRequestBlock = (
     StartMarker: (
@@ -180,3 +182,4 @@ var
       $9572709F31764C62
     )
   ); public name 'limine_request_block';
+{$pop}
