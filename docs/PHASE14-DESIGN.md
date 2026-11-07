@@ -13,12 +13,14 @@ outputs are isolated under `build/release/` and `build/debug/`, so changing
 compiler diagnostics cannot silently reuse objects produced by the other
 profile.
 
-Both profiles currently retain `-O-`. Release omits debug information; debug
-adds FPC debug information (`-g`) without implicitly linking the LineInfo RTL unit. Debug mode
-**does not enable Pascal range or overflow checks**: the freestanding kernel
-and userland do not yet provide the runtime error handlers those switches may
-require. Enabling those checks is a separate task once Mistix has its own
-panic/abort hooks and the resulting freestanding link has been verified.
+Both profiles retain `-O-`. Release omits debug information; debug adds FPC
+debug information (`-g`) without implicitly linking the LineInfo RTL unit.
+
+At the Phase 14 baseline, debug mode **does not enable Pascal range or overflow
+checks** because the freestanding runtime handlers had not yet been added.
+Phase 15 completes that deferred work: debug builds now enable range and
+integer-overflow checking and provide Mistix-owned fatal handlers. See
+[docs/PHASE15-DESIGN.md](PHASE15-DESIGN.md).
 
 Convenience targets:
 

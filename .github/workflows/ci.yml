@@ -80,8 +80,11 @@ jobs:
       - name: Build debug profile
         run: make debug
 
-      - name: Build ISO and boot it in QEMU
-        run: make smoke SMOKE_TIMEOUT=45
+      - name: Boot release profile in QEMU
+        run: make smoke BUILD_TYPE=release SMOKE_TIMEOUT=45
+
+      - name: Boot checked debug profile in QEMU
+        run: make smoke BUILD_TYPE=debug SMOKE_TIMEOUT=45
 
       - name: Preserve build and serial-log artifacts
         if: always()
@@ -94,3 +97,5 @@ jobs:
             build/release/mistix.iso
             build/release/qemu-serial.log
             build/debug/kernel.elf
+            build/debug/mistix.iso
+            build/debug/qemu-serial.log

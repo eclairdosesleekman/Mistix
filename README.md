@@ -10,7 +10,7 @@ The project explores how Pascal's explicit types, structured records, and readab
 
 ## Current implementation
 
-The latest source and design milestone in the repository is **Phase 13**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
+The latest source and design milestone in the repository is **Phase 15**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
 
 ### Kernel and execution environment
 
@@ -119,7 +119,7 @@ Phase 14 adds repeatable host-side validation without changing the kernel ABI:
 - A headless QEMU boot smoke test that checks kernel and init serial markers.
 - GitHub Actions on pull requests and pushes to `main`, with a pinned Limine v12.9.6 release and retained build logs.
 
-Debug mode uses FPC debug information (`-g`) only. It avoids `-gl`, which implicitly links the LineInfo RTL unit, and does not enable Pascal range or overflow checks because the freestanding programs do not yet supply the runtime error handlers those switches may need.
+Debug mode keeps FPC debug information (`-g`) without `-gl`. Phase 15 adds range and integer-overflow checks to Debug builds using Mistix-owned freestanding runtime handlers; Release builds keep those checks disabled.
 
 Run the host-side checks and profiles with:
 
@@ -136,6 +136,21 @@ make smoke
 ```
 
 See [docs/PHASE14-DESIGN.md](docs/PHASE14-DESIGN.md) for the exact validation scope and limitations. The smoke test is a BIOS/QEMU bring-up check, not a complete userland test, SMP test, UEFI qualification, or real-hardware certification.
+
+
+## Phase 15 — Freestanding runtime diagnostics
+
+Phase 15 completes the runtime-checking work deferred by Phase 14:
+
+- Debug builds use FPC `-Cr -Co` and define `MISTIX_DEBUG_CHECKS`, enabling Pascal range (`{$R+}`) and integer-overflow (`{$Q+}`) checks across kernel and userland.
+- The kernel provides the compiler runtime entry points `FPC_RANGEERROR`, `FPC_OVERFLOW`, and `FPC_DIVBYZERO`. They emit a concise diagnostic on COM1 and halt without depending on the hosted RTL.
+- Userland provides the same entry points, terminating only the faulting process with the matching runtime-error status (201, 215, or 200).
+- Release builds retain the existing unchecked `{$R-}` / `{$Q-}` configuration.
+- `make phase15-check` verifies compiler flags, conditional directives, and freestanding handler wiring.
+
+The handlers intentionally do not enable stack checking, I/O checking, exceptions, floating-point traps, or FPC line-info support. They are minimal fatal paths, not a replacement for the full Free Pascal RTL.
+
+See [docs/PHASE15-DESIGN.md](docs/PHASE15-DESIGN.md) for ABI details and validation scope.
 
 ## Networking
 
@@ -203,6 +218,7 @@ make phase11-check
 make phase12-check
 make phase13-check
 make phase14-check
+make phase15-check
 make test
 ```
 
@@ -249,6 +265,7 @@ The design notes are the best place to find the detailed invariants and limitati
 - [Phase 12 — Multi-request VFS broker](docs/PHASE12-DESIGN.md)
 - [Phase 13 — File seeking](docs/PHASE13-DESIGN.md)
 - [Phase 14 — Build, test, and boot validation](docs/PHASE14-DESIGN.md)
+- [Phase 15 — Freestanding runtime diagnostics](docs/PHASE15-DESIGN.md)
 
 Some legacy serial-output text still uses a Phase 9 label; the source and design notes describe later Phase 11–14 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
 

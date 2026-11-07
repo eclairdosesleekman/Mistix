@@ -2,8 +2,13 @@ unit MistixKernel;
 
 {$mode objfpc}
 {$H-}
+{$ifdef MISTIX_DEBUG_CHECKS}
+{$R+}
+{$Q+}
+{$else}
 {$R-}
 {$Q-}
+{$endif}
 {$S-}
 {$I-}
 {$ALIGN 8}
@@ -35,5 +40,6 @@ implementation
 {$I mistix_timer.inc}
 {$I mistix_trap.inc}
 {$I mistix_main.inc}
+{$I mistix_runtime.inc}
 
 end.
