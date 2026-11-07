@@ -188,7 +188,7 @@ Phase 18 extends the Debug-only child-process fault suite from compiler runtime 
 
 The Debug smoke target requires both the Phase 17 runtime-check marker and the new Phase 18 page-fault marker. Release does not execute deliberate faults. Run `make phase18-check` for host-only source-contract validation. The tests cover these four controlled cases; they are not exhaustive MMU testing or hardware qualification.
 
-The phase notes distinguish source-contract checks from **FPC 実コンパイル** and QEMU runtime validation; static checks alone do not prove the kernel boots.
+The phase notes distinguish source-contract checks from **FPC  real compilation** and QEMU runtime validation; static checks alone do not prove the kernel boots.
 
 ## Networking
 
@@ -265,7 +265,7 @@ make test
 
 These Python checks verify selected source structure, ABI constants, and wiring between the kernel and userland services. They are **static checks**, not runtime tests.
 
-The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified（未確認）** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
+The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
 
 ## Repository layout
 
