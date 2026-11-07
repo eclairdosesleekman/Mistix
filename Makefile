@@ -14,7 +14,7 @@ SMOKE_TIMEOUT ?= 45
 
 BUILD_TYPE ?= release
 ifeq ($(BUILD_TYPE),debug)
-FPC_DIAGNOSTIC_FLAGS ?= -g -gl
+FPC_DIAGNOSTIC_FLAGS ?= -g
 else ifeq ($(BUILD_TYPE),release)
 FPC_DIAGNOSTIC_FLAGS ?= -g-
 else
