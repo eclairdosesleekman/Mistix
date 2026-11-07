@@ -30,7 +30,7 @@ object must reference the range/overflow helpers and retain a native signed
 
 1. Compiles the probe in a temporary directory.
 2. Uses GNU `nm -u` to require undefined references to:
-   - `FPC_RANGEERROR` — Pascal range checking;
+   - `fpc_rangeerror` — Pascal range checking;
    - `FPC_OVERFLOW` — Pascal integer-overflow checking.
 3. Uses GNU `objdump -d` to require a signed `IDIV` instruction.
 
@@ -72,7 +72,7 @@ helpers, native divide instructions, and Mistix's freestanding handlers.
 ## Acceptance criteria
 
 1. `make phase16-check` passes without FPC or QEMU.
-2. `make fpc-runtime-check` finds `FPC_RANGEERROR` and `FPC_OVERFLOW`
+2. `make fpc-runtime-check` finds `fpc_rangeerror` and `FPC_OVERFLOW`
    and confirms native signed `IDIV` code generation.
 3. The full Release and Debug kernel/userland links remain free of unexpected
    undefined symbols.
