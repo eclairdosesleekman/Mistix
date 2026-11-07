@@ -631,9 +631,16 @@ begin
     QWord(SlotIndex) * VFS_BROKER_SLOT_SIZE;
   ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
 
-  { Clear the private lane before placing this request's input in it. }
-  for I := 0 to VFS_BROKER_SLOT_SIZE - 1 do
-    VFSBrokerScratch[I mod VFS_IO_MAX] := 0;
+  { Clear the complete private lane before staging this request. }
+  for I := 0 to VFS_IO_MAX - 1 do VFSBrokerScratch[I] := 0;
+  if not AddressSpaceCopyTo(ServerRoot, LaneAddress,
+       @VFSBrokerScratch[0], VFS_IO_MAX) or
+     not AddressSpaceCopyTo(ServerRoot, LaneAddress + VFS_IO_MAX,
+       @VFSBrokerScratch[0], VFS_IO_MAX) then
+  begin
+    Result := QWord(-14);
+    Exit;
+  end;
   if Operation = VFS_BROKER_OP_WRITE then
   begin
     if (ByteCount <> 0) and not AddressSpaceCopyFrom(
