@@ -40,13 +40,17 @@ from its process command line:
 
 - `range`: indexes a four-element array using a runtime-derived out-of-range
   value;
-- `overflow`: adds a positive runtime-derived value to `High(LongInt)`;
+- `overflow`: adds a positive runtime-derived value to `High(Int64)`, causing
+  a signed overflow at the native 64-bit arithmetic width used by x86-64 FPC;
 - `divide`: forms a zero divisor from runtime-supplied command-line bytes and
   performs integer division.
 
-The Debug profile enables `{$R+}` and `{$Q+}`; reaching the normal return path
-is treated as a test failure (status 99). Invalid probe arguments exit with
-status 2.
+The Debug profile enables `{$R+}` and `{$Q+}`; the overflow probe deliberately
+uses `Int64` because FPC widens `LongInt` arithmetic to the native 64-bit width
+on x86-64, which can produce a range-check failure (201) rather than the
+integer-overflow hook (215) when narrowing the result. Reaching the normal
+return path is treated as a test failure (status 99). Invalid probe arguments
+exit with status 2.
 
 ## Process-isolation test
 
