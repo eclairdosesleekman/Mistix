@@ -224,9 +224,28 @@ var
   Frame: PInterruptFrame;
   Tail: PQWord;
 begin
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessInitializeFrame: begin index=');
+  WriteDecimal(ProcessIndex);
+  WriteText(#13#10);
+{$endif}
   Top := ProcessTable[ProcessIndex].KernelStackTop;
-  FrameAddress := Top - SizeOf(TInterruptFrame) - (2 * SizeOf(QWord));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessInitializeFrame: stack top=');
+  WriteHex64(Top);
+  WriteText(#13#10);
+{$endif}
+  FrameAddress := Top - QWord(SizeOf(TInterruptFrame)) -
+                  (2 * QWord(SizeOf(QWord)));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessInitializeFrame: frame address=');
+  WriteHex64(FrameAddress);
+  WriteText(#13#10);
+{$endif}
   Frame := PInterruptFrame(PtrUInt(FrameAddress));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessInitializeFrame: frame pointer set.'#13#10);
+{$endif}
   Frame^.SavedR15 := 0;
   Frame^.SavedR14 := 0;
   Frame^.SavedR13 := 0;
@@ -247,11 +266,17 @@ begin
   Frame^.RIP := ProcessTable[ProcessIndex].EntryPoint;
   Frame^.CS := $43;
   Frame^.RFLAGS := $202; { bit 1 and IF; IOPL, DF, TF remain clear }
-  Tail := PQWord(PtrUInt(FrameAddress + SizeOf(TInterruptFrame)));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessInitializeFrame: register frame written.'#13#10);
+{$endif}
+  Tail := PQWord(PtrUInt(FrameAddress + QWord(SizeOf(TInterruptFrame))));
   Tail^ := ProcessTable[ProcessIndex].UserStackPointer;
   Inc(Tail);
   Tail^ := $3B;
   ProcessTable[ProcessIndex].SavedFrame := FrameAddress;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessInitializeFrame: complete.'#13#10);
+{$endif}
 end;
 
 procedure ProcessManagerInitialize;
@@ -419,6 +444,9 @@ begin
   WriteText('[DEBUG] ProcessCreateFromELF: VFS state initialized.'#13#10);
 {$endif}
   ProcessTable[Slot].CommandLine[0] := #0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: command line cleared.'#13#10);
+{$endif}
   ProcessInitializeFrame(Slot);
 {$ifdef MISTIX_DEBUG_CHECKS}
   WriteText('[DEBUG] ProcessCreateFromELF: initial frame created.'#13#10);
