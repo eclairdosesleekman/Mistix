@@ -1032,6 +1032,66 @@ begin
   end;
 end;
 
+function VFSSeekUser(var Files: TVFSProcessFiles; FD,
+  Offset, Whence: QWord): QWord;
+var
+  DescriptionIndex, NodeIndex: LongInt;
+  BasePosition, Magnitude, NewPosition: QWord;
+  SignedOffset: Int64;
+begin
+  Result := VFS_ERR_BADF;
+  DescriptionIndex := VFSFDDescription(Files, FD);
+  if DescriptionIndex < 0 then Exit;
+  if Whence > 2 then
+  begin
+    Result := VFS_ERR_INVAL;
+    Exit;
+  end;
+  if VFSOpenDescriptions[DescriptionIndex].Kind <> voRegular then
+  begin
+    if (VFSOpenDescriptions[DescriptionIndex].Kind = voDirectory) or
+       (VFSOpenDescriptions[DescriptionIndex].Kind = voRemoteDirectory) then
+      Result := VFS_ERR_ISDIR
+    else
+      Result := QWord(-29); { -ESPIPE: streams and pipes have no file offset. }
+    Exit;
+  end;
+  NodeIndex := VFSOpenDescriptions[DescriptionIndex].NodeIndex;
+  if (NodeIndex < 0) or (NodeIndex >= LongInt(VFSNodeCount)) then
+  begin
+    Result := VFS_ERR_BADF;
+    Exit;
+  end;
+  case Whence of
+    0: BasePosition := 0;
+    1: BasePosition := VFSOpenDescriptions[DescriptionIndex].Position;
+  else
+    BasePosition := VFSNodes[NodeIndex].Size;
+  end;
+  SignedOffset := Int64(Offset);
+  if SignedOffset < 0 then
+  begin
+    Magnitude := QWord(-(SignedOffset + 1)) + 1;
+    if Magnitude > BasePosition then
+    begin
+      Result := VFS_ERR_INVAL;
+      Exit;
+    end;
+    NewPosition := BasePosition - Magnitude;
+  end
+  else
+  begin
+    Magnitude := QWord(SignedOffset);
+    if Magnitude > High(QWord) - BasePosition then
+    begin
+      Result := VFS_ERR_INVAL;
+      Exit;
+    end;
+    NewPosition := BasePosition + Magnitude;
+  end;
+  VFSOpenDescriptions[DescriptionIndex].Position := NewPosition;
+  Result := NewPosition;
+end;
 function VFSCloseUser(var Files: TVFSProcessFiles; FD: QWord): QWord;
 begin
   Result := VFS_ERR_BADF;
