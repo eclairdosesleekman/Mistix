@@ -42,7 +42,7 @@ def main() -> int:
         "objdump_command + [", "SIGNED_DIVISION", "TemporaryDirectory",
     ))
     require("docs/PHASE16-DESIGN.md", (
-        "FPC_RANGEERROR", "FPC_OVERFLOW", "IDIV", "#DE",
+        "fpc_rangeerror", "FPC_OVERFLOW", "IDIV", "#DE",
         "make fpc-runtime-check", "compile-time ABI test",
         "does not execute those handlers",
     ))
