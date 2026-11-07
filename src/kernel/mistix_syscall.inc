@@ -188,308 +188,172 @@ asm
 end;
 
 procedure VFSBrokerInitialize; forward;
-procedure VFSBrokerPumpReplies; forward;
-function VFSBrokerHasActiveRequests: Boolean; forward;
-
-procedure SyscallInitialize;
-begin
-  VFSBrokerInitialize;
-  SetIDTGate(128, PtrUInt(@SyscallISR), 0);
-  IDT[128].Attributes := $EE; { Present, DPL 3, 64-bit interrupt gate. }
-  LoadIDT(@IDTRegister);
-  WriteText('[ OK ] DPL-3 int 0x80 syscall gate installed.'#13#10);
-end;
-
-procedure VFSBrokerInitialize;
-var
-  I, J: LongWord;
-begin
-  VFSBrokerRegistered := False;
-  VFSBrokerServerPID := 0;
-  VFSBrokerServerIndex := PROCESS_INDEX_NONE;
-  VFSBrokerRequestEndpointIndex := 0;
-  VFSBrokerRequestEndpointGeneration := 0;
-  VFSBrokerReplyEndpointIndex := 0;
-  VFSBrokerReplyEndpointGeneration := 0;
-  VFSBrokerNextTransaction := 1;
-  VFSBrokerServerGeneration := 0;
-  VFSBrokerTickCounter := 0;
-  for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
-  begin
-    VFSBrokerPending[I].Active := 0;
-    VFSBrokerPending[I].Ready := 0;
-    VFSBrokerPending[I].Cancelled := 0;
-    VFSBrokerPending[I].CancelSent := 0;
-    VFSBrokerPending[I].Operation := 0;
-    VFSBrokerPending[I].OwnerIndex := PROCESS_INDEX_NONE;
-    VFSBrokerPending[I].OwnerPID := 0;
-    VFSBrokerPending[I].TransactionID := 0;
-    VFSBrokerPending[I].ServerGeneration := 0;
-    VFSBrokerPending[I].DeadlineTick := 0;
-    VFSBrokerPending[I].CancelDeadlineTick := 0;
-    VFSBrokerPending[I].RemoteHandle := 0;
-    VFSBrokerPending[I].UserBuffer := 0;
-    VFSBrokerPending[I].ByteCount := 0;
-    VFSBrokerPending[I].Flags := 0;
-    VFSBrokerPending[I].ResultValue := QWord(-11);
-    VFSBrokerPending[I].Payload := 0;
-    for J := 0 to VFS_PATH_MAX do VFSBrokerPending[I].RequestPath[J] := #0;
-  end;
-  VFSBrokerCloseCount := 0;
-end;
-
-function SyscallVFSRegister(ServerPID, RequestHandle,
-  ReplyHandle: QWord): QWord;
-var
-  ServerIndex: LongWord;
-  RequestObject, RequestGeneration: Word;
-  ReplyObject, ReplyGeneration: Word;
-  Offset, InitPhysical, ServerPhysical, InitFlags, ServerFlags: QWord;
-begin
-  Result := QWord(-1); { -EPERM: only init registers the global VFS broker. }
-  if CurrentProcessIndex >= PROCESS_MAX_COUNT then Exit;
-  if ProcessTable[CurrentProcessIndex].PID <> 1 then Exit;
-  Result := QWord(-22);
-  if (RequestHandle > High(LongWord)) or (ReplyHandle > High(LongWord)) or
-     (RequestHandle = ReplyHandle) then Exit;
-  Result := QWord(-3); { -ESRCH }
-  if not ProcessFindByPID(ServerPID, ServerIndex) then Exit;
-  if (ServerIndex = CurrentProcessIndex) or
-     (ProcessTable[ServerIndex].ParentPID <> 1) or
-     (ProcessTable[ServerIndex].State = psZombie) or
-     (ProcessTable[ServerIndex].State = psFree) then Exit;
-  Result := QWord(-9);
-  if ProcessCapabilityLookup(ProcessTable[CurrentProcessIndex].Capabilities,
-       LongWord(RequestHandle), CAP_RIGHT_SEND, okEndpoint,
-       RequestObject, RequestGeneration) <> krSuccess then Exit;
-  if ProcessCapabilityLookup(ProcessTable[CurrentProcessIndex].Capabilities,
-       LongWord(ReplyHandle), CAP_RIGHT_RECEIVE, okEndpoint,
-       ReplyObject, ReplyGeneration) <> krSuccess then Exit;
-  Result := QWord(-22);
-  if (RequestObject = ReplyObject) or
-     (RequestObject >= ENDPOINT_MAX_COUNT) or
-     (ReplyObject >= ENDPOINT_MAX_COUNT) then Exit;
-  if (EndpointTable[RequestObject].Active = 0) or
-     (EndpointTable[RequestObject].Generation <> RequestGeneration) or
-     (EndpointTable[ReplyObject].Active = 0) or
-     (EndpointTable[ReplyObject].Generation <> ReplyGeneration) then Exit;
-  Result := QWord(-14);
-  if not AddressSpaceValidateUserRange(ProcessTable[CurrentProcessIndex].AddressSpaceRoot,
-       VFS_BROKER_SHARED_BASE, VFS_BROKER_SHARED_SIZE) or
-     not AddressSpaceValidateUserRange(ProcessTable[ServerIndex].AddressSpaceRoot,
-       VFS_BROKER_SHARED_BASE, VFS_BROKER_SHARED_SIZE) then Exit;
-  { Verify that PID 1 and vfsd mapped the *same* shared pages, not merely
-    unrelated writable pages at the agreed virtual address. }
-  Offset := 0;
-  while Offset < VFS_BROKER_SHARED_SIZE do
-  begin
-    if not AddressSpaceTranslate(ProcessTable[CurrentProcessIndex].AddressSpaceRoot,
-         VFS_BROKER_SHARED_BASE + Offset, InitPhysical, InitFlags) or
-       not AddressSpaceTranslate(ProcessTable[ServerIndex].AddressSpaceRoot,
-         VFS_BROKER_SHARED_BASE + Offset, ServerPhysical, ServerFlags) then Exit;
-    if ((InitPhysical and not QWord(PAGE_SIZE - 1)) <>
-        (ServerPhysical and not QWord(PAGE_SIZE - 1))) or
-       ((InitFlags and (PTE_USER or PTE_WRITABLE)) <> (PTE_USER or PTE_WRITABLE)) or
-       ((ServerFlags and (PTE_USER or PTE_WRITABLE)) <> (PTE_USER or PTE_WRITABLE)) then Exit;
-    Inc(Offset, PAGE_SIZE);
-  end;
-  if VFSBrokerRegistered then
-  begin
-    if (VFSBrokerServerPID = ServerPID) and
-       (VFSBrokerServerIndex = ServerIndex) and
-       (VFSBrokerRequestEndpointIndex = RequestObject) and
-       (VFSBrokerRequestEndpointGeneration = RequestGeneration) and
-       (VFSBrokerReplyEndpointIndex = ReplyObject) and
-       (VFSBrokerReplyEndpointGeneration = ReplyGeneration) then
-      Result := 0
-    else
-      Result := QWord(-16);
-    Exit;
-  end;
-  VFSBrokerPumpReplies;
-  if VFSBrokerHasActiveRequests then
-  begin
-    Result := QWord(-16);
-    Exit;
-  end;
-  VFSBrokerServerPID := ServerPID;
-  VFSBrokerServerIndex := ServerIndex;
-  VFSBrokerRequestEndpointIndex := RequestObject;
-  VFSBrokerRequestEndpointGeneration := RequestGeneration;
-  VFSBrokerReplyEndpointIndex := ReplyObject;
-  VFSBrokerReplyEndpointGeneration := ReplyGeneration;
-  Inc(VFSBrokerServerGeneration);
-  if VFSBrokerServerGeneration = 0 then VFSBrokerServerGeneration := 1;
-  VFSBrokerRegistered := True;
-  WriteText('[ OK ] Kernel VFS syscall broker registered with userland vfsd.'#13#10);
-  VFSBrokerFlushRemoteCloses;
-  Result := 0;
-end;
-
-function VFSBrokerServerAlive: Boolean;
-begin
-  Result := False;
-  if not VFSBrokerRegistered then Exit;
-  if VFSBrokerServerIndex >= PROCESS_MAX_COUNT then Exit;
-  if ProcessTable[VFSBrokerServerIndex].PID <> VFSBrokerServerPID then Exit;
-  if ProcessTable[VFSBrokerServerIndex].State = psFree then Exit;
-  if ProcessTable[VFSBrokerServerIndex].State = psZombie then Exit;
-  Result := True;
-end;
-
-function VFSBrokerQueueRequest(const Message: TIPCMessage): Boolean;
-var
-  Endpoint: ^TEndpoint;
-  ObjectIndex: Word;
-  ObjectGeneration: Word;
-begin
-  Result := False;
-  ObjectIndex := VFSBrokerRequestEndpointIndex;
-  ObjectGeneration := VFSBrokerRequestEndpointGeneration;
-  if ObjectIndex >= ENDPOINT_MAX_COUNT then Exit;
-  Endpoint := @EndpointTable[ObjectIndex];
-  if (Endpoint^.Active = 0) or
-     (Endpoint^.Generation <> ObjectGeneration) then Exit;
-  if Endpoint^.Count >= IPC_QUEUE_DEPTH then Exit;
-  Endpoint^.Queue[Endpoint^.Tail] := Message;
-  Endpoint^.Tail := (Endpoint^.Tail + 1) mod IPC_QUEUE_DEPTH;
-  Inc(Endpoint^.Count);
-  ThreadWakeWaiters(EndpointWaitKey(ObjectIndex, ObjectGeneration,
-    WAIT_KEY_ENDPOINT_RECEIVE), True);
-  Result := True;
-end;
-
-procedure VFSQueueRemoteClose(RemoteHandle: QWord);
-begin
-  if RemoteHandle = 0 then Exit;
-  { Handles from an old/dead server must never be replayed to a replacement. }
-  if not VFSBrokerRegistered then Exit;
-  if VFSBrokerCloseCount >= VFS_BROKER_CLOSE_QUEUE_MAX then Exit;
-  VFSBrokerCloseQueue[VFSBrokerCloseCount] := RemoteHandle;
-  Inc(VFSBrokerCloseCount);
-end;
-
-procedure VFSBrokerFlushRemoteCloses;
-var
-  Message: TIPCMessage;
-  I: LongWord;
-begin
-  if not VFSBrokerRegistered or not VFSBrokerServerAlive then Exit;
-  while VFSBrokerCloseCount <> 0 do
-  begin
-    Message.MessageId := VFS_BROKER_CLOSE;
-    Message.WordCount := 4;
-    for I := 0 to 6 do Message.Reserved[I] := 0;
-    for I := 0 to IPC_MAX_WORDS - 1 do Message.Words[I] := 0;
-    { Transaction zero identifies an asynchronous last-reference close. }
-    Message.Words[2] := VFSBrokerCloseQueue[0];
-    if not VFSBrokerQueueRequest(Message) then Exit;
-    for I := 1 to VFSBrokerCloseCount - 1 do
-      VFSBrokerCloseQueue[I - 1] := VFSBrokerCloseQueue[I];
-    Dec(VFSBrokerCloseCount);
-  end;
-end;
-
 procedure VFSBrokerPumpReplies;
 var
   Endpoint: ^TEndpoint;
   Message: TIPCMessage;
   ObjectIndex: Word;
   ObjectGeneration: Word;
-  OwnerPID: QWord;
-  I: LongWord;
+  I, MatchIndex: LongWord;
+  OwnerAlive: Boolean;
 begin
-  if not VFSBrokerRegistered then
+  if VFSBrokerRegistered and not VFSBrokerServerAlive then
   begin
-    if VFSBrokerPending.Active <> 0 then
-      if VFSBrokerPending.OwnerIndex < PROCESS_MAX_COUNT then
-        if (ProcessTable[VFSBrokerPending.OwnerIndex].PID <> VFSBrokerPending.OwnerPID) or
-           (ProcessTable[VFSBrokerPending.OwnerIndex].State = psZombie) or
-           (ProcessTable[VFSBrokerPending.OwnerIndex].State = psFree) then
+    for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+      if VFSBrokerPending[I].Active <> 0 then
+      begin
+        if VFSBrokerPending[I].Cancelled <> 0 then
+          VFSBrokerClearPending(I)
+        else
         begin
-          VFSBrokerPending.Active := 0;
-          VFSBrokerPending.Ready := 0;
+          VFSBrokerPending[I].Ready := 1;
+          VFSBrokerPending[I].ResultValue := QWord(-5); { -EIO }
+          VFSBrokerPending[I].Payload := 0;
         end;
-    Exit;
-  end;
-  if not VFSBrokerServerAlive then
-  begin
-    if VFSBrokerPending.Active <> 0 then
-    begin
-      VFSBrokerPending.Ready := 1;
-      VFSBrokerPending.ResultValue := QWord(-5); { -EIO }
-      VFSBrokerPending.Payload := 0;
-    end;
+      end;
     VFSBrokerRegistered := False;
     VFSBrokerCloseCount := 0;
     Exit;
   end;
-  ObjectIndex := VFSBrokerReplyEndpointIndex;
-  ObjectGeneration := VFSBrokerReplyEndpointGeneration;
-  if ObjectIndex >= ENDPOINT_MAX_COUNT then
+
+  if VFSBrokerRegistered then
   begin
-    if VFSBrokerPending.Active <> 0 then
+    ObjectIndex := VFSBrokerReplyEndpointIndex;
+    ObjectGeneration := VFSBrokerReplyEndpointGeneration;
+    if ObjectIndex >= ENDPOINT_MAX_COUNT then
     begin
-      VFSBrokerPending.Ready := 1;
-      VFSBrokerPending.ResultValue := QWord(-5);
-      VFSBrokerPending.Payload := 0;
+      VFSBrokerRegistered := False;
+      VFSBrokerCloseCount := 0;
+      for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+        if VFSBrokerPending[I].Active <> 0 then
+        begin
+          VFSBrokerPending[I].Ready := 1;
+          VFSBrokerPending[I].ResultValue := QWord(-5);
+          VFSBrokerPending[I].Payload := 0;
+        end;
+      Exit;
     end;
-    VFSBrokerRegistered := False;
-    VFSBrokerCloseCount := 0;
-    Exit;
-  end;
-  Endpoint := @EndpointTable[ObjectIndex];
-  if (Endpoint^.Active = 0) or
-     (Endpoint^.Generation <> ObjectGeneration) then
-  begin
-    if VFSBrokerPending.Active <> 0 then
+    Endpoint := @EndpointTable[ObjectIndex];
+    if (Endpoint^.Active = 0) or
+       (Endpoint^.Generation <> ObjectGeneration) then
     begin
-      VFSBrokerPending.Ready := 1;
-      VFSBrokerPending.ResultValue := QWord(-5);
-      VFSBrokerPending.Payload := 0;
+      VFSBrokerRegistered := False;
+      VFSBrokerCloseCount := 0;
+      for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+        if VFSBrokerPending[I].Active <> 0 then
+        begin
+          VFSBrokerPending[I].Ready := 1;
+          VFSBrokerPending[I].ResultValue := QWord(-5);
+          VFSBrokerPending[I].Payload := 0;
+        end;
+      Exit;
     end;
-    VFSBrokerRegistered := False;
-    VFSBrokerCloseCount := 0;
-    Exit;
-  end;
-  while Endpoint^.Count <> 0 do
-  begin
-    Message := Endpoint^.Queue[Endpoint^.Head];
-    Endpoint^.Head := (Endpoint^.Head + 1) mod IPC_QUEUE_DEPTH;
-    Dec(Endpoint^.Count);
-    if (VFSBrokerPending.Active = 0) or (VFSBrokerPending.Ready <> 0) then
-      Continue;
-    if (Message.Words[0] <> VFSBrokerPending.TransactionID) then Continue;
-    OwnerPID := VFSBrokerPending.OwnerPID;
-    if (Message.WordCount < 3) or (Message.Words[1] <> OwnerPID) then
+
+    while Endpoint^.Count <> 0 do
     begin
-      VFSBrokerPending.ResultValue := QWord(-71); { -EPROTO }
-      VFSBrokerPending.Payload := 0;
-      VFSBrokerPending.Ready := 1;
-      Continue;
+      Message := Endpoint^.Queue[Endpoint^.Head];
+      Endpoint^.Head := (Endpoint^.Head + 1) mod IPC_QUEUE_DEPTH;
+      Dec(Endpoint^.Count);
+      MatchIndex := VFS_BROKER_PENDING_MAX;
+      for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+        if (VFSBrokerPending[I].Active <> 0) and
+           (VFSBrokerPending[I].TransactionID = Message.Words[0]) then
+        begin
+          MatchIndex := I;
+          Break;
+        end;
+      if MatchIndex >= VFS_BROKER_PENDING_MAX then Continue;
+
+      if VFSBrokerPending[MatchIndex].Cancelled <> 0 then
+      begin
+        if (Message.MessageId = VFS_BROKER_CANCEL) and
+           (Message.WordCount >= 4) and
+           (Message.Words[1] = VFSBrokerPending[MatchIndex].OwnerPID) and
+           (Message.Words[3] =
+             VFSBrokerPending[MatchIndex].ServerGeneration) then
+          VFSBrokerClearPending(MatchIndex)
+        else if (Message.MessageId <> VFS_BROKER_CANCEL) and
+                (Message.WordCount >= 4) and
+                (Message.Words[1] = VFSBrokerPending[MatchIndex].OwnerPID) and
+                (Message.Words[3] =
+                  VFSBrokerPending[MatchIndex].ServerGeneration) then
+        begin
+          if (Message.MessageId = 0) and
+             ((VFSBrokerPending[MatchIndex].Operation = VFS_BROKER_OP_OPEN) or
+              (VFSBrokerPending[MatchIndex].Operation =
+                VFS_BROKER_OP_DIR_OPEN)) and
+             (Message.Words[2] <> 0) then
+            VFSQueueRemoteClose(Message.Words[2]);
+          VFSBrokerClearPending(MatchIndex);
+        end;
+        Continue;
+      end;
+
+      if (Message.WordCount < 4) or
+         (Message.Words[1] <> VFSBrokerPending[MatchIndex].OwnerPID) or
+         (Message.Words[3] <>
+           VFSBrokerPending[MatchIndex].ServerGeneration) then
+      begin
+        VFSBrokerPending[MatchIndex].ResultValue := QWord(-71); { -EPROTO }
+        VFSBrokerPending[MatchIndex].Payload := 0;
+        VFSBrokerPending[MatchIndex].Ready := 1;
+        Continue;
+      end;
+      VFSBrokerPending[MatchIndex].ResultValue := Message.MessageId;
+      VFSBrokerPending[MatchIndex].Payload := Message.Words[2];
+      VFSBrokerPending[MatchIndex].Ready := 1;
     end;
-    VFSBrokerPending.ResultValue := Message.MessageId;
-    VFSBrokerPending.Payload := Message.Words[2];
-    VFSBrokerPending.Ready := 1;
+
+    ThreadWakeWaiters(EndpointWaitKey(ObjectIndex, ObjectGeneration,
+      WAIT_KEY_ENDPOINT_SEND), False);
   end;
-  { Replies can free queue slots for any sender waiting on this endpoint. }
-  ThreadWakeWaiters(EndpointWaitKey(ObjectIndex, ObjectGeneration,
-    WAIT_KEY_ENDPOINT_SEND), False);
-  for I := 0 to PROCESS_MAX_COUNT - 1 do
-    if (VFSBrokerPending.Active <> 0) and
-       (VFSBrokerPending.OwnerIndex = I) and
-       ((ProcessTable[I].PID <> VFSBrokerPending.OwnerPID) or
-        (ProcessTable[I].State = psZombie) or
-        (ProcessTable[I].State = psFree)) and
-       (VFSBrokerPending.Ready <> 0) then
+
+  for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+    if VFSBrokerPending[I].Active <> 0 then
     begin
-      if ((VFSBrokerPending.Operation = VFS_BROKER_OP_OPEN) or
-          (VFSBrokerPending.Operation = VFS_BROKER_OP_DIR_OPEN)) and
-         (VFSBrokerPending.ResultValue = 0) and
-         (VFSBrokerPending.Payload <> 0) then
-        VFSQueueRemoteClose(VFSBrokerPending.Payload);
-      VFSBrokerPending.Active := 0;
-      VFSBrokerPending.Ready := 0;
+      OwnerAlive := False;
+      if VFSBrokerPending[I].OwnerIndex < PROCESS_MAX_COUNT then
+        OwnerAlive :=
+          (ProcessTable[VFSBrokerPending[I].OwnerIndex].PID =
+            VFSBrokerPending[I].OwnerPID) and
+          (ProcessTable[VFSBrokerPending[I].OwnerIndex].State <> psZombie) and
+          (ProcessTable[VFSBrokerPending[I].OwnerIndex].State <> psFree);
+
+      if not OwnerAlive then
+      begin
+        if VFSBrokerPending[I].Ready <> 0 then
+        begin
+          if (VFSBrokerPending[I].ResultValue = 0) and
+             ((VFSBrokerPending[I].Operation = VFS_BROKER_OP_OPEN) or
+              (VFSBrokerPending[I].Operation = VFS_BROKER_OP_DIR_OPEN)) and
+             (VFSBrokerPending[I].Payload <> 0) then
+            VFSQueueRemoteClose(VFSBrokerPending[I].Payload);
+          VFSBrokerClearPending(I);
+          Continue;
+        end;
+        if VFSBrokerPending[I].Cancelled = 0 then
+        begin
+          VFSBrokerPending[I].Cancelled := 1;
+          VFSBrokerPending[I].CancelDeadlineTick :=
+            VFSBrokerTickCounter + VFS_BROKER_CANCEL_GRACE_TICKS;
+        end;
+      end
+      else if (VFSBrokerPending[I].Ready = 0) and
+              (VFSBrokerPending[I].Cancelled = 0) and
+              (VFSBrokerTickCounter >= VFSBrokerPending[I].DeadlineTick) then
+      begin
+        VFSBrokerPending[I].Ready := 1;
+        VFSBrokerPending[I].ResultValue := VFS_BROKER_ERR_TIMEOUT;
+        VFSBrokerPending[I].Payload := 0;
+      end;
+
+      if VFSBrokerPending[I].Cancelled <> 0 then
+      begin
+        VFSBrokerTrySendCancel(I);
+        if VFSBrokerTickCounter >=
+           VFSBrokerPending[I].CancelDeadlineTick then
+          VFSBrokerClearPending(I);
+      end;
     end;
   VFSBrokerFlushRemoteCloses;
 end;
