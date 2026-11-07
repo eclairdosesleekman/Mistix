@@ -45,3 +45,17 @@ processes requests serially.
 
 Run `make phase12-check` for static source-contract checks. FPC compilation,
 ISO generation and QEMU runtime testing have not been run.
+
+## Phase 13 — Remote and local file seeking
+
+Phase 13 adds the lseek syscall and the SysLseek userland wrapper. Regular
+files opened through the kernel VFS and remote files owned by vfsd support
+SEEK_SET, SEEK_CUR, and SEEK_END. Offsets are signed 64-bit values;
+negative seeks before byte zero and arithmetic overflow return EINVAL.
+Pipes, streams, and directory descriptors are not seekable.
+
+For remote files, the kernel transports the offset in the request's private
+8 KiB lane and keeps the six-word IPC message layout unchanged. vfsd updates
+the shared open-description position, so duplicated descriptors observe
+the same cursor. Run make phase13-check for source-contract checks. Free Pascal
+compilation, ISO generation and QEMU runtime tests have not been run.

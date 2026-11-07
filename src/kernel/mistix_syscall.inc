@@ -32,6 +32,7 @@ const
   MISTIX_SYSCALL_BLOCK_INFO = 29;
   MISTIX_SYSCALL_BLOCK_READ = 30;
   MISTIX_SYSCALL_VFS_REGISTER = 31;
+  MISTIX_SYSCALL_LSEEK = 32;
 
   MISTIX_SYSCALL_MAX_WRITE = 4096;
   MISTIX_ERR_BADF = $FFFFFFFFFFFFFFF7;
@@ -50,6 +51,7 @@ const
   VFS_BROKER_DIR_OPEN = $4D56534600000021;
   VFS_BROKER_DIR_READ = $4D56534600000022;
   VFS_BROKER_CHDIR = $4D56534600000024;
+  VFS_BROKER_SEEK = $4D56534600000015;
   VFS_BROKER_CANCEL = $4D56534600000026;
   VFS_BROKER_PENDING_MAX = 8;
   VFS_BROKER_SLOT_SIZE = 8192;
@@ -63,6 +65,7 @@ const
   VFS_BROKER_OP_DIR_OPEN = 5;
   VFS_BROKER_OP_DIR_READ = 6;
   VFS_BROKER_OP_CHDIR = 7;
+  VFS_BROKER_OP_SEEK = 8;
   VFS_BROKER_DIRENT_MAX = 16;
   VFS_BROKER_CLOSE_QUEUE_MAX = 128;
 
@@ -667,6 +670,11 @@ begin
       Exit;
     end;
   end;
+  if Operation = VFS_BROKER_OP_SEEK then
+  begin
+    Result := QWord(-22);
+    if (RemoteHandle = 0) or (ByteCount > 2) then Exit;
+  end;
 
   if ProcessIndex >= PROCESS_MAX_COUNT then
   begin
@@ -846,6 +854,8 @@ begin
           Result := QWord(-71)
         else
           Result := Payload;
+      VFS_BROKER_OP_SEEK:
+        Result := Payload;
       VFS_BROKER_OP_CLOSE:
         Result := 0;
     else
@@ -882,7 +892,8 @@ begin
     for I := 0 to High(LocalPath) do LocalPath[I] := 0;
     for I := 0 to PathLength - 1 do LocalPath[I] := Ord(Path[I]);
   end
-  else if (Operation <> VFS_BROKER_OP_CLOSE) then
+  else if (Operation <> VFS_BROKER_OP_CLOSE) and
+          (Operation <> VFS_BROKER_OP_SEEK) then
   begin
     Result := QWord(-22);
     Exit;
@@ -936,6 +947,17 @@ begin
       Result := QWord(-14);
       Exit;
     end;
+  end
+  else if Operation = VFS_BROKER_OP_SEEK then
+  begin
+    for I := 0 to 7 do
+      VFSBrokerScratch[I] := Byte(UserBuffer shr (I * 8));
+    if not AddressSpaceCopyTo(ServerRoot, LaneAddress,
+         @VFSBrokerScratch[0], 8) then
+    begin
+      Result := QWord(-14);
+      Exit;
+    end;
   end;
 
   Message.MessageId := 0;
@@ -950,6 +972,7 @@ begin
     VFS_BROKER_OP_DIR_OPEN: Message.MessageId := VFS_BROKER_DIR_OPEN;
     VFS_BROKER_OP_DIR_READ: Message.MessageId := VFS_BROKER_DIR_READ;
     VFS_BROKER_OP_CHDIR: Message.MessageId := VFS_BROKER_CHDIR;
+    VFS_BROKER_OP_SEEK: Message.MessageId := VFS_BROKER_SEEK;
   end;
   if VFSBrokerNextTransaction = 0 then VFSBrokerNextTransaction := 1;
   Message.Words[0] := VFSBrokerNextTransaction;
@@ -1180,6 +1203,29 @@ begin
     PathAddress);
 end;
 
+function SyscallLseekUser(Process: PKernelProcess; FileDescriptor,
+  Offset, Whence: QWord): QWord;
+var
+  RemoteHandle: QWord;
+  RemoteFlags: LongWord;
+  DescriptionIndex: LongInt;
+  EmptyPath: array[0..0] of Char;
+begin
+  if Whence > 2 then
+  begin
+    Result := QWord(-22);
+    Exit;
+  end;
+  if VFSIsRemoteFD(Process^.Files, FileDescriptor, RemoteHandle,
+       RemoteFlags, DescriptionIndex) then
+  begin
+    EmptyPath[0] := #0;
+    Result := VFSBrokerCall(CurrentProcessIndex, VFS_BROKER_OP_SEEK,
+      RemoteHandle, Offset, Whence, 0, EmptyPath);
+    Exit;
+  end;
+  Result := VFSSeekUser(Process^.Files, FileDescriptor, Offset, Whence);
+end;
 function SyscallCloseUser(Process: PKernelProcess; FileDescriptor: QWord): QWord;
 begin
   { VFSReleaseDescription queues a remote CLOSE when the final local
@@ -1332,6 +1378,10 @@ begin
 
     MISTIX_SYSCALL_CHDIR:
       ReturnValue := SyscallChdirUser(Process, Frame^.SavedRDI);
+
+    MISTIX_SYSCALL_LSEEK:
+      ReturnValue := SyscallLseekUser(Process, Frame^.SavedRDI,
+        Frame^.SavedRSI, Frame^.SavedRDX);
 
     MISTIX_SYSCALL_GETCWD:
       ReturnValue := VFSGetCWDUser(Process^.Files, Process^.AddressSpaceRoot,

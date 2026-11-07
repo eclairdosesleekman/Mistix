@@ -30,6 +30,7 @@ const
   VFS_RPC_BROKER_READ = $4D56534600000012;
   VFS_RPC_BROKER_WRITE = $4D56534600000013;
   VFS_RPC_BROKER_CLOSE = $4D56534600000014;
+  VFS_RPC_BROKER_SEEK = $4D56534600000015;
   VFS10_DIR_OPEN = $4D56534600000021;
   VFS10_DIR_READ = $4D56534600000022;
   VFS10_CHDIR = $4D56534600000024;
@@ -383,6 +384,8 @@ var
   Dest, Source: PByte;
   Flags: LongWord;
   DirectoryPosition, EntryBytes: QWord;
+  SeekOffset: Int64;
+  SeekBase, SeekMagnitude, SeekTarget: QWord;
 begin
   ClearMessage(Response);
   Response.MessageId := VFS_ERR_INVAL;
@@ -548,6 +551,55 @@ begin
         Response.Words[2] := Requested;
       end;
 
+    VFS_RPC_BROKER_SEEK:
+      begin
+        if Request.WordCount < 4 then Exit;
+        if not LookupOpen(Request.Words[2], Slot) then
+        begin
+          Response.MessageId := VFS_ERR_BADF;
+          Exit;
+        end;
+        if OpenSlots[Slot].SourceKind = 3 then
+        begin
+          Response.MessageId := QWord(-29); { -ESPIPE }
+          Exit;
+        end;
+        if Request.Words[3] > 2 then
+        begin
+          Response.MessageId := VFS_ERR_INVAL;
+          Exit;
+        end;
+        SeekOffset := Int64(ReadLE64(SharedBuffer, 0));
+        case Request.Words[3] of
+          0: SeekBase := 0;
+          1: SeekBase := OpenSlots[Slot].Position;
+        else
+          SeekBase := OpenSlots[Slot].DataSize;
+        end;
+        if SeekOffset < 0 then
+        begin
+          SeekMagnitude := QWord(-(SeekOffset + 1)) + 1;
+          if SeekMagnitude > SeekBase then
+          begin
+            Response.MessageId := VFS_ERR_INVAL;
+            Exit;
+          end;
+          SeekTarget := SeekBase - SeekMagnitude;
+        end
+        else
+        begin
+          SeekMagnitude := QWord(SeekOffset);
+          if SeekMagnitude > High(QWord) - SeekBase then
+          begin
+            Response.MessageId := VFS_ERR_INVAL;
+            Exit;
+          end;
+          SeekTarget := SeekBase + SeekMagnitude;
+        end;
+        OpenSlots[Slot].Position := SeekTarget;
+        Response.MessageId := 0;
+        Response.Words[2] := SeekTarget;
+      end;
     VFS10_DIR_OPEN:
       begin
         if Request.WordCount < 4 then Exit;
@@ -758,7 +810,7 @@ var
   DirectoryEntryCount: LongWord;
 begin
   if ((Request.MessageId >= VFS_RPC_BROKER_OPEN) and
-      (Request.MessageId <= VFS_RPC_BROKER_CLOSE)) or
+      (Request.MessageId <= VFS_RPC_BROKER_SEEK)) or
      ((Request.MessageId >= VFS10_DIR_OPEN) and
       (Request.MessageId <= VFS10_CHDIR)) or
      (Request.MessageId = VFS10_CANCEL) then
@@ -1146,7 +1198,7 @@ begin
     IsBrokerTransaction :=
       (Request.Words[0] <> 0) and
       (((Request.MessageId >= VFS_RPC_BROKER_OPEN) and
-        (Request.MessageId <= VFS_RPC_BROKER_CLOSE)) or
+        (Request.MessageId <= VFS_RPC_BROKER_SEEK)) or
        ((Request.MessageId >= VFS10_DIR_OPEN) and
         (Request.MessageId <= VFS10_CHDIR)));
     if IsBrokerTransaction then
