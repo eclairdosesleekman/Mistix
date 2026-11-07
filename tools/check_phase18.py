@@ -64,6 +64,14 @@ def main() -> int:
     require("src/kernel/mistix_types.inc", (
         "PTE_NO_EXECUTE = not QWord($7FFFFFFFFFFFFFFF)",
     ))
+    require("src/kernel/mistix_cpu.inc", (
+        "{$push}",
+        "{$R-} { TSS descriptor bit packing must preserve unsigned high address bits. }",
+        "procedure BuildTSSDescriptor;",
+        "GDT[9] :=",
+        "GDT[10] := BaseAddress shr 32;",
+        "{$pop}",
+    ))
     require("src/kernel/mistix_address_space.inc", (
         "ProgramHeader^.Flags and (ELF_PF_WRITE or ELF_PF_EXECUTE)",
         "PageFlags := PTE_USER;",
