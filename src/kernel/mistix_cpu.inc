@@ -210,8 +210,17 @@ function StackTopAligned(BaseAddress: PtrUInt; StackSize: PtrUInt): QWord;
 var
   Top: PtrUInt;
 begin
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] StackTopAligned: entered.'#13#10);
+{$endif}
   Top := (BaseAddress + StackSize) and not PtrUInt(15);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] StackTopAligned: arithmetic complete.'#13#10);
+{$endif}
   Result := QWord(Top);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] StackTopAligned: result assigned.'#13#10);
+{$endif}
 end;
 
 procedure BuildTSSDescriptor;
@@ -554,15 +563,34 @@ begin
   GDT[6] := $00CF92000000FFFF; { ring-0 data, selector 0x30 }
   GDT[7] := $00CFF2000000FFFF; { ring-3 data, selector 0x3B }
   GDT[8] := $00AFFA000000FFFF; { ring-3 code, selector 0x43 }
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: GDT descriptors initialized.'#13#10);
+{$endif}
 
   TaskState.Reserved0 := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: TSS Reserved0 set.'#13#10);
+{$endif}
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: computing RSP0.'#13#10);
+{$endif}
   TaskState.RSP0 := StackTopAligned(PtrUInt(@KernelTransitionStack[0]),
                                     SizeOf(KernelTransitionStack));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: RSP0 assigned.'#13#10);
+{$endif}
   TaskState.RSP1 := 0;
   TaskState.RSP2 := 0;
   TaskState.Reserved1 := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: RSP1/RSP2/reserved set.'#13#10);
+  WriteText('[DEBUG] CPU init: computing IST1.'#13#10);
+{$endif}
   TaskState.IST1 := StackTopAligned(PtrUInt(@DoubleFaultStack[0]),
                                     SizeOf(DoubleFaultStack));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: IST1 assigned.'#13#10);
+{$endif}
   TaskState.IST2 := 0;
   TaskState.IST3 := 0;
   TaskState.IST4 := 0;
