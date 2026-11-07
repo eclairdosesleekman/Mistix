@@ -1,3 +1,6 @@
+const
+  LIMINE_MAX_MEMMAP_ENTRIES = 4096;
+
 type
   TUInt64 = QWord;
   PQWord = ^QWord;
@@ -12,7 +15,7 @@ type
     EntryType: TUInt64;
   end;
 
-  TLimineMemmapEntryArray = array[0..0] of PLimineMemmapEntry;
+  TLimineMemmapEntryArray = array[0..LIMINE_MAX_MEMMAP_ENTRIES - 1] of PLimineMemmapEntry;
 
   TLimineMemmapResponse = record
     Revision: TUInt64;
@@ -87,7 +90,6 @@ const
   LIMINE_MEMMAP_USABLE = 0;
   LIMINE_BASE_REVISION = 6;
   LIMINE_PAGING_MODE_X86_64_4LVL = 0;
-  LIMINE_MAX_MEMMAP_ENTRIES = 4096;
 
   PAGE_SIZE = 4096;
   PAGE_MASK = $FFFFFFFFFFFFF000;
@@ -100,7 +102,7 @@ const
   PTE_HUGE = $080;
   PTE_GLOBAL = $100;
   PTE_COW = $200; { Software-managed copy-on-write marker. }
-  PTE_NO_EXECUTE = $8000000000000000;
+  PTE_NO_EXECUTE = not QWord($7FFFFFFFFFFFFFFF);
   PTE_ALLOWED_FLAGS = PTE_WRITABLE or PTE_USER or PTE_WRITE_THROUGH or
                       PTE_CACHE_DISABLE or PTE_GLOBAL or PTE_COW or PTE_NO_EXECUTE;
 

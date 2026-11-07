@@ -20,9 +20,12 @@ does not execute guest-only instructions on the host.
 - `MISTIX_DEBUG_CHECKS` (the same conditional used by Mistix Debug images).
 
 Its three procedures contain dynamic array indexing, signed integer addition,
-and signed integer division with a runtime-supplied divisor. The generated
-object must reference the range/overflow helpers and retain a native signed
-`IDIV` instruction for the division operation.
+and signed 64-bit integer addition at `High(Int64)`, plus signed integer
+division with a runtime-supplied divisor. The generated object must reference
+the range/overflow helpers and retain a native signed `IDIV` instruction for
+the division operation. Using `Int64` ensures the overflow probe exercises the
+native signed width of the x86-64 target; a `LongInt` addition is widened by
+FPC and may instead raise a range error when narrowed back to 32 bits.
 
 ## Validation target
 
@@ -76,8 +79,9 @@ helpers, native divide instructions, and Mistix's freestanding handlers.
 ## Acceptance criteria
 
 1. `make phase16-check` passes without FPC or QEMU.
-2. `make fpc-runtime-check` finds `fpc_rangeerror` and `FPC_OVERFLOW`
-   and confirms native signed `IDIV` code generation.
+2. `make fpc-runtime-check` finds `fpc_rangeerror` and `FPC_OVERFLOW` from
+   range and native-width signed overflow checks, and confirms signed `IDIV`
+   code generation.
 3. The full Release and Debug kernel/userland links remain free of unexpected
    undefined symbols.
 4. CI reaches and passes both profile builds and QEMU smoke tests.

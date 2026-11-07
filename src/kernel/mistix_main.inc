@@ -81,14 +81,23 @@ begin
   end;
 
   CPUInitialize;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] KernelMain: CPUInitialize returned.'#13#10);
+{$endif}
   Memmap := LimineRequests.MemmapRequest.Response;
   HHDM := LimineRequests.HHDMRequest.Response;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] KernelMain: entering MemoryInitialize.'#13#10);
+{$endif}
   if not MemoryInitialize(Memmap, HHDM^.Offset) then
   begin
     WriteText('[FAIL] Memory subsystem initialisation failed.'#13#10);
     HaltForever;
   end;
 
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] KernelMain: MemoryInitialize returned.'#13#10);
+{$endif}
   ThreadsInitialize;
   CapabilityInitialize;
   IPCInitialize;

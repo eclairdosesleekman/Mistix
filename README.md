@@ -10,7 +10,7 @@ The project explores how Pascal's explicit types, structured records, and readab
 
 ## Current implementation
 
-The latest source and design milestone in the repository is **Phase 17**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
+The latest source and design milestone in the repository is **Phase 18**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
 
 ### Kernel and execution environment
 
@@ -170,11 +170,25 @@ Run `make fpc-runtime-check` on a host with FPC and GNU `nm` installed. CI runs 
 Phase 17 closes the userland runtime-hook gap and exercises the process-exit path end to end:
 
 - The shared userland library now defines `FPC_DIVBYZERO`, `FPC_RANGEERROR`, and `FPC_OVERFLOW`; each hook exits only the faulting process with the compiler's runtime error code.
-- A freestanding `/bin/runtimefault` test image can trigger range, overflow, and divide-by-zero checks from runtime-supplied values.
+- A freestanding `/bin/runtimefault` test image can trigger range, native-width (`Int64`) overflow, and divide-by-zero checks from runtime-supplied values.
 - Debug init launches each case as a child, waits for it, and checks the returned status (201, 215, and the vector-0 exception tag `0x8000000000000000`). The test fails boot smoke if the child does not exit with its expected code or cannot be reaped.
 - Release does not run deliberate fault cases. The new Debug smoke assertion requires the Phase 17 success marker.
 
 Run `make phase17-check` for host-only source-contract validation. `make smoke BUILD_TYPE=debug` builds the image and requires all three guest-side fault tests to pass under QEMU. This is targeted process-isolation coverage, not an exhaustive fault or hardware-validation suite.
+
+## Phase 18 — user-mode page-fault isolation
+
+Phase 18 extends the Debug-only child-process fault suite from compiler runtime errors to x86-64 page protection:
+
+- An unmapped user page is read and written in separate child processes.
+- ELF pages are initialized in an inactive address space through a writable/NX staging mapping, then receive their final W^X/NX permissions.
+- A child attempts to write into its read-only executable text page.
+- A child writes a `RET` byte to its stack and attempts to execute it, checking the stack's NX mapping.
+- PID 1 waits for each child and checks the exact vector-14 status, including the page-fault P/W/U/I-D error bits. A normal return is treated as a test failure.
+
+The Debug smoke target requires both the Phase 17 runtime-check marker and the new Phase 18 page-fault marker. Release does not execute deliberate faults. Run `make phase18-check` for host-only source-contract validation. The tests cover these four controlled cases; they are not exhaustive MMU testing or hardware qualification.
+
+The phase notes distinguish source-contract checks from **FPC 実コンパイル** and QEMU runtime validation; static checks alone do not prove the kernel boots.
 
 ## Networking
 
@@ -251,7 +265,7 @@ make test
 
 These Python checks verify selected source structure, ABI constants, and wiring between the kernel and userland services. They are **static checks**, not runtime tests.
 
-The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
+The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified（未確認）** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
 
 ## Repository layout
 
@@ -296,6 +310,7 @@ The design notes are the best place to find the detailed invariants and limitati
 - [Phase 15 — Freestanding runtime diagnostics](docs/PHASE15-DESIGN.md)
 - [Phase 16 — FPC runtime-check ABI verification](docs/PHASE16-DESIGN.md)
 - [Phase 17 — Runtime fault isolation](docs/PHASE17-DESIGN.md)
+- [Phase 18 — User-mode page-fault isolation](docs/PHASE18-DESIGN.md)
 
 Some legacy serial-output text still uses a Phase 9 label; the source and design notes describe later Phase 11–17 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
 

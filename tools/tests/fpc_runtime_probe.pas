@@ -15,7 +15,7 @@ unit FPC_Runtime_Probe;
 interface
 
 procedure ProbeRange(Index: LongInt);
-procedure ProbeOverflow(Left, Right: LongInt);
+procedure ProbeOverflow(Left, Right: Int64);
 procedure ProbeDivideByZero(Numerator, Denominator: LongInt);
 
 implementation
@@ -25,7 +25,7 @@ type
 
 var
   ProbeTable: array[TProbeIndex] of Byte;
-  ProbeArithmeticResult: LongInt;
+  ProbeArithmeticResult: Int64;
   ProbeDivisionResult: LongInt;
 
 procedure ProbeRange(Index: LongInt);
@@ -33,7 +33,7 @@ begin
   ProbeTable[Index] := Byte(Index);
 end;
 
-procedure ProbeOverflow(Left, Right: LongInt);
+procedure ProbeOverflow(Left, Right: Int64);
 begin
   ProbeArithmeticResult := Left + Right;
 end;

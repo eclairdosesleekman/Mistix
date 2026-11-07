@@ -210,10 +210,21 @@ function StackTopAligned(BaseAddress: PtrUInt; StackSize: PtrUInt): QWord;
 var
   Top: PtrUInt;
 begin
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] StackTopAligned: entered.'#13#10);
+{$endif}
   Top := (BaseAddress + StackSize) and not PtrUInt(15);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] StackTopAligned: arithmetic complete.'#13#10);
+{$endif}
   Result := QWord(Top);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] StackTopAligned: result assigned.'#13#10);
+{$endif}
 end;
 
+{$push}
+{$R-} { TSS descriptor bit packing must preserve unsigned high address bits. }
 procedure BuildTSSDescriptor;
 var
   BaseAddress: QWord;
@@ -230,6 +241,7 @@ begin
     (((BaseAddress shr 24) and $FF) shl 56);
   GDT[10] := BaseAddress shr 32;
 end;
+{$pop}
 
 procedure SetIDTGate(Vector: LongWord; HandlerAddress: QWord; ISTIndex: Byte);
 var
@@ -538,8 +550,14 @@ begin
   { Limine Base Revision 5+ guarantees the initial selectors used here:
       CS = 0x28, DS/ES/SS = 0x30.
     Preserve those descriptor slots while adding user descriptors and TSS. }
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: clearing GDT.'#13#10);
+{$endif}
   for I := 0 to 10 do
     GDT[I] := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: GDT descriptors written.'#13#10);
+{$endif}
   GDT[1] := $00009A000000FFFF; { 16-bit code }
   GDT[2] := $000092000000FFFF; { 16-bit data }
   GDT[3] := $00CF9A000000FFFF; { 32-bit code }
@@ -548,15 +566,34 @@ begin
   GDT[6] := $00CF92000000FFFF; { ring-0 data, selector 0x30 }
   GDT[7] := $00CFF2000000FFFF; { ring-3 data, selector 0x3B }
   GDT[8] := $00AFFA000000FFFF; { ring-3 code, selector 0x43 }
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: GDT descriptors initialized.'#13#10);
+{$endif}
 
   TaskState.Reserved0 := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: TSS Reserved0 set.'#13#10);
+{$endif}
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: computing RSP0.'#13#10);
+{$endif}
   TaskState.RSP0 := StackTopAligned(PtrUInt(@KernelTransitionStack[0]),
                                     SizeOf(KernelTransitionStack));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: RSP0 assigned.'#13#10);
+{$endif}
   TaskState.RSP1 := 0;
   TaskState.RSP2 := 0;
   TaskState.Reserved1 := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: RSP1/RSP2/reserved set.'#13#10);
+  WriteText('[DEBUG] CPU init: computing IST1.'#13#10);
+{$endif}
   TaskState.IST1 := StackTopAligned(PtrUInt(@DoubleFaultStack[0]),
                                     SizeOf(DoubleFaultStack));
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: IST1 assigned.'#13#10);
+{$endif}
   TaskState.IST2 := 0;
   TaskState.IST3 := 0;
   TaskState.IST4 := 0;
@@ -567,14 +604,26 @@ begin
   TaskState.Reserved3 := 0;
   TaskState.IOPBOffset := SizeOf(TTSS64); { no I/O bitmap: ring 3 I/O is denied }
   BuildTSSDescriptor;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: TSS descriptor built.'#13#10);
+{$endif}
 
   GDTRegister.Limit := SizeOf(GDT) - 1;
   GDTRegister.Base := PtrUInt(@GDT[0]);
   LoadGDT(@GDTRegister);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: GDT loaded.'#13#10);
+{$endif}
   LoadTaskRegister;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: task register loaded.'#13#10);
+{$endif}
 
   for I := 0 to 255 do
     SetIDTGate(I, PtrUInt(@ISRSpurious), 0);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: IDT default gates installed.'#13#10);
+{$endif}
 
   SetIDTGate(0,  PtrUInt(@ISR0), 0);
   SetIDTGate(1,  PtrUInt(@ISR1), 0);
@@ -608,12 +657,22 @@ begin
   SetIDTGate(29, PtrUInt(@ISR29), 0);
   SetIDTGate(30, PtrUInt(@ISR30), 0);
   SetIDTGate(31, PtrUInt(@ISR31), 0);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: exception gates installed.'#13#10);
+{$endif}
 
   IDTRegister.Limit := SizeOf(IDT) - 1;
   IDTRegister.Base := PtrUInt(@IDT[0]);
   LoadIDT(@IDTRegister);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: IDT loaded.'#13#10);
+  WriteText('[DEBUG] CPU init: enabling NX.'#13#10);
+{$endif}
 
   CPUHasNXSupport := CPUEnableNX;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] CPU init: NX check complete.'#13#10);
+{$endif}
   WriteText('[ OK ] GDT loaded; Limine selectors preserved; 64-bit TSS installed.'#13#10);
   WriteText('[ OK ] IDT loaded with exception gates 0..31 and double-fault IST.'#13#10);
   if CPUHasNXSupport then
