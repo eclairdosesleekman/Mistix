@@ -98,31 +98,31 @@ check-build-tools:
 	@command -v $(READELF) >/dev/null || { echo 'Missing readelf'; exit 1; }
 	@command -v $(PYTHON) >/dev/null || { echo 'Missing python3'; exit 1; }
 $(INIT_ELF): userland/init/mistixinit.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/init/mistixinit.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/init/mistixinit.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixinit.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(SHELL_ELF): userland/sh/mistixsh.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/sh/mistixsh.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/sh/mistixsh.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixsh.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(LS_ELF): userland/bin/mistixls.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixls.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/bin/mistixls.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixls.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(CAT_ELF): userland/bin/mistixcat.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixcat.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/bin/mistixcat.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixcat.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(ECHO_ELF): userland/bin/mistixecho.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixecho.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/bin/mistixecho.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixecho.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
@@ -134,31 +134,31 @@ $(VFS_BASE_BLOB_OBJ): $(VFS_BASEFS_IMG) | $(USER_BUILD_DIR)
 	cd $(BUILD_DIR) && $(LD) -r -b binary -o user/vfs_base_blob.o vfs_base.img
 
 $(VFSD_ELF): userland/vfs/mistixvfsd.pas $(COMMON_INC) userland/vfs/mistix_ext2_types.inc userland/vfs/mistix_ext2_client.inc userland/user.ld $(VFS_BASE_BLOB_OBJ) | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common -Fi../../userland/vfs ../../userland/vfs/mistixvfsd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common -Fi../../../userland/vfs ../../../userland/vfs/mistixvfsd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixvfsd.o $(VFS_BASE_BLOB_OBJ)
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(BLOCKD_ELF): userland/block/mistixblockd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/block/mistixblockd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/block/mistixblockd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixblockd.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(DEVD_ELF): userland/device/mistixdevd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/device/mistixdevd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/device/mistixdevd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixdevd.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(NETD_ELF): userland/network/mistixnetd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/network/mistixnetd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/network/mistixnetd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixnetd.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(RUNTIMEFAULT_ELF): userland/tests/mistixruntimefault.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/tests/mistixruntimefault.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/tests/mistixruntimefault.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixruntimefault.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
