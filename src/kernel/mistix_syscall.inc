@@ -188,7 +188,7 @@ procedure SyscallISR; assembler; nostackframe; public name 'mistix_syscall_isr';
 asm
   push 0
   push 128
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure VFSBrokerInitialize; forward;
