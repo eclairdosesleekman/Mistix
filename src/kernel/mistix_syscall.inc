@@ -79,6 +79,7 @@ type
     Ready: Byte;
     Cancelled: Byte;
     CancelSent: Byte;
+    TimeoutDelivered: Byte;
     Operation: Byte;
     OwnerIndex: LongWord;
     OwnerPID: QWord;
@@ -220,6 +221,7 @@ begin
     VFSBrokerPending[I].Ready := 0;
     VFSBrokerPending[I].Cancelled := 0;
     VFSBrokerPending[I].CancelSent := 0;
+    VFSBrokerPending[I].TimeoutDelivered := 0;
     VFSBrokerPending[I].Operation := 0;
     VFSBrokerPending[I].OwnerIndex := PROCESS_INDEX_NONE;
     VFSBrokerPending[I].OwnerPID := 0;
@@ -431,6 +433,7 @@ begin
   VFSBrokerPending[Index].Ready := 0;
   VFSBrokerPending[Index].Cancelled := 0;
   VFSBrokerPending[Index].CancelSent := 0;
+  VFSBrokerPending[Index].TimeoutDelivered := 0;
   VFSBrokerPending[Index].Operation := 0;
   VFSBrokerPending[Index].OwnerIndex := PROCESS_INDEX_NONE;
   VFSBrokerPending[Index].OwnerPID := 0;
@@ -592,6 +595,10 @@ begin
         VFSBrokerPending[I].Ready := 1;
         VFSBrokerPending[I].ResultValue := VFS_BROKER_ERR_TIMEOUT;
         VFSBrokerPending[I].Payload := 0;
+        VFSBrokerPending[I].Cancelled := 1;
+        VFSBrokerPending[I].CancelDeadlineTick :=
+          VFSBrokerTickCounter + VFS_BROKER_CANCEL_GRACE_TICKS;
+        VFSBrokerTrySendCancel(I);
       end;
       if VFSBrokerPending[I].Cancelled <> 0 then
       begin
@@ -650,7 +657,10 @@ begin
   PendingIndex := -1;
   for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
     if (VFSBrokerPending[I].Active <> 0) and
-       (VFSBrokerPending[I].Cancelled = 0) and
+       ((VFSBrokerPending[I].Cancelled = 0) or
+        ((VFSBrokerPending[I].Ready <> 0) and
+         (VFSBrokerPending[I].ResultValue = VFS_BROKER_ERR_TIMEOUT) and
+         (VFSBrokerPending[I].TimeoutDelivered = 0))) and
        (VFSBrokerPending[I].OwnerIndex = ProcessIndex) and
        (VFSBrokerPending[I].OwnerPID = ProcessTable[ProcessIndex].PID) then
     begin
@@ -685,17 +695,7 @@ begin
     if Status <> 0 then
     begin
       if Status = VFS_BROKER_ERR_TIMEOUT then
-      begin
-        if VFSBrokerPending[SlotIndex].CancelSent <> 0 then
-          VFSBrokerClearPending(SlotIndex)
-        else
-        begin
-          VFSBrokerPending[SlotIndex].Cancelled := 1;
-          VFSBrokerPending[SlotIndex].CancelDeadlineTick :=
-            VFSBrokerTickCounter + VFS_BROKER_CANCEL_GRACE_TICKS;
-          VFSBrokerTrySendCancel(SlotIndex);
-        end;
-      end
+        VFSBrokerPending[SlotIndex].TimeoutDelivered := 1
       else
         VFSBrokerClearPending(SlotIndex);
       Result := Status;
@@ -950,6 +950,7 @@ begin
   VFSBrokerPending[SlotIndex].Ready := 0;
   VFSBrokerPending[SlotIndex].Cancelled := 0;
   VFSBrokerPending[SlotIndex].CancelSent := 0;
+  VFSBrokerPending[SlotIndex].TimeoutDelivered := 0;
   VFSBrokerPending[SlotIndex].Operation := Operation;
   VFSBrokerPending[SlotIndex].OwnerIndex := ProcessIndex;
   VFSBrokerPending[SlotIndex].OwnerPID := ProcessTable[ProcessIndex].PID;
