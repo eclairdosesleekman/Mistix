@@ -68,7 +68,7 @@ Services use capability-protected IPC endpoints. Shared memory carries bulk data
 ### Filesystems and storage
 
 - **MFS1** is the immutable base filesystem image embedded into the system.
-- **`/tmp`** is a small writable in-memory overlay. The current VFS service defines eight temporary-file slots and a 4 KiB maximum per temporary file. Its contents are volatile.
+- **`/tmp`** is a small writable in-memory overlay. The current VFS service defines eight temporary-file slots and a 4 KiB maximum per temporary file; the `O_CREAT` path is covered by the init create/write/read round-trip. Its contents are volatile.
 - **Ext2** is supported as a read-only subset and is exposed under **`/mnt/disk`** when a supported partition is found. The userland Ext2 client performs filesystem reads through `vfsd` and `blockd`.
 - The hardware block path currently targets the primary-master ATA PIO device using LBA28 and 512-byte sectors. MBR partition discovery is implemented; this is not a general storage-driver stack.
 - Physical-disk writes are deliberately unavailable through the current block syscall interface. Writable filesystem behavior is limited to volatile storage such as `/tmp`.
