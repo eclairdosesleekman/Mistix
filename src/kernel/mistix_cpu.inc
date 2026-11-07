@@ -245,6 +245,9 @@ begin
   Gate^.Reserved := 0;
 end;
 
+function TrapDispatch(Frame: PInterruptFrame): QWord; cdecl; forward;
+procedure ISRCommon; assembler; nostackframe; forward;
+
 procedure ISR0; assembler; nostackframe; public name 'mistix_isr_0';
 asm
   push 0
