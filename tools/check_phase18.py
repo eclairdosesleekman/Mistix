@@ -42,7 +42,7 @@ def main() -> int:
         raise SystemExit("The unmapped user page must be probed once for read and once for write.")
 
     require("userland/init/mistixinit.pas", (
-        "PAGE_FAULT_STATUS_BASE = QWord($8000000000000000) or (QWord(14) shl 32)",
+        "PAGE_FAULT_STATUS_BASE = not QWord($7FFFFFF1FFFFFFFF)",
         "RuntimePageReadArgs", "RuntimePageWriteArgs",
         "RuntimePageTextWriteArgs", "RuntimePageExecNXArgs",
         "PAGE_FAULT_STATUS_BASE or 4",
