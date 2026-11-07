@@ -50,6 +50,12 @@ const
   VFS_BROKER_DIR_OPEN = $4D56534600000021;
   VFS_BROKER_DIR_READ = $4D56534600000022;
   VFS_BROKER_CHDIR = $4D56534600000024;
+  VFS_BROKER_CANCEL = $4D56534600000026;
+  VFS_BROKER_PENDING_MAX = 8;
+  VFS_BROKER_SLOT_SIZE = 8192;
+  VFS_BROKER_TIMEOUT_TICKS = 500;
+  VFS_BROKER_CANCEL_GRACE_TICKS = 1000;
+  VFS_BROKER_ERR_TIMEOUT = QWord(-110);
   VFS_BROKER_OP_OPEN = 1;
   VFS_BROKER_OP_READ = 2;
   VFS_BROKER_OP_WRITE = 3;
@@ -71,10 +77,15 @@ type
   TVFSBrokerPending = record
     Active: Byte;
     Ready: Byte;
+    Cancelled: Byte;
+    CancelSent: Byte;
     Operation: Byte;
     OwnerIndex: LongWord;
     OwnerPID: QWord;
     TransactionID: QWord;
+    ServerGeneration: QWord;
+    DeadlineTick: QWord;
+    CancelDeadlineTick: QWord;
     RemoteHandle: QWord;
     UserBuffer: QWord;
     ByteCount: QWord;
@@ -95,7 +106,9 @@ var
   VFSBrokerReplyEndpointIndex: Word;
   VFSBrokerReplyEndpointGeneration: Word;
   VFSBrokerNextTransaction: QWord;
-  VFSBrokerPending: TVFSBrokerPending;
+  VFSBrokerServerGeneration: QWord;
+  VFSBrokerTickCounter: QWord;
+  VFSBrokerPending: array[0..VFS_BROKER_PENDING_MAX - 1] of TVFSBrokerPending;
   VFSBrokerScratch: array[0..VFS_IO_MAX - 1] of Byte;
   VFSBrokerCloseQueue: array[0..VFS_BROKER_CLOSE_QUEUE_MAX - 1] of QWord;
   VFSBrokerCloseCount: LongWord;
@@ -175,6 +188,8 @@ asm
 end;
 
 procedure VFSBrokerInitialize; forward;
+procedure VFSBrokerPumpReplies; forward;
+function VFSBrokerHasActiveRequests: Boolean; forward;
 
 procedure SyscallInitialize;
 begin
@@ -187,7 +202,7 @@ end;
 
 procedure VFSBrokerInitialize;
 var
-  I: LongWord;
+  I, J: LongWord;
 begin
   VFSBrokerRegistered := False;
   VFSBrokerServerPID := 0;
@@ -197,19 +212,29 @@ begin
   VFSBrokerReplyEndpointIndex := 0;
   VFSBrokerReplyEndpointGeneration := 0;
   VFSBrokerNextTransaction := 1;
-  VFSBrokerPending.Active := 0;
-  VFSBrokerPending.Ready := 0;
-  VFSBrokerPending.Operation := 0;
-  VFSBrokerPending.OwnerIndex := PROCESS_INDEX_NONE;
-  VFSBrokerPending.OwnerPID := 0;
-  VFSBrokerPending.TransactionID := 0;
-  VFSBrokerPending.RemoteHandle := 0;
-  VFSBrokerPending.UserBuffer := 0;
-  VFSBrokerPending.ByteCount := 0;
-  VFSBrokerPending.Flags := 0;
-  VFSBrokerPending.ResultValue := QWord(-11);
-  VFSBrokerPending.Payload := 0;
-  for I := 0 to VFS_PATH_MAX do VFSBrokerPending.RequestPath[I] := #0;
+  VFSBrokerServerGeneration := 0;
+  VFSBrokerTickCounter := 0;
+  for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+  begin
+    VFSBrokerPending[I].Active := 0;
+    VFSBrokerPending[I].Ready := 0;
+    VFSBrokerPending[I].Cancelled := 0;
+    VFSBrokerPending[I].CancelSent := 0;
+    VFSBrokerPending[I].Operation := 0;
+    VFSBrokerPending[I].OwnerIndex := PROCESS_INDEX_NONE;
+    VFSBrokerPending[I].OwnerPID := 0;
+    VFSBrokerPending[I].TransactionID := 0;
+    VFSBrokerPending[I].ServerGeneration := 0;
+    VFSBrokerPending[I].DeadlineTick := 0;
+    VFSBrokerPending[I].CancelDeadlineTick := 0;
+    VFSBrokerPending[I].RemoteHandle := 0;
+    VFSBrokerPending[I].UserBuffer := 0;
+    VFSBrokerPending[I].ByteCount := 0;
+    VFSBrokerPending[I].Flags := 0;
+    VFSBrokerPending[I].ResultValue := QWord(-11);
+    VFSBrokerPending[I].Payload := 0;
+    for J := 0 to VFS_PATH_MAX do VFSBrokerPending[I].RequestPath[J] := #0;
+  end;
   VFSBrokerCloseCount := 0;
 end;
 
@@ -281,7 +306,8 @@ begin
       Result := QWord(-16);
     Exit;
   end;
-  if VFSBrokerPending.Active <> 0 then
+  VFSBrokerPumpReplies;
+  if VFSBrokerHasActiveRequests then
   begin
     Result := QWord(-16);
     Exit;
@@ -292,6 +318,8 @@ begin
   VFSBrokerRequestEndpointGeneration := RequestGeneration;
   VFSBrokerReplyEndpointIndex := ReplyObject;
   VFSBrokerReplyEndpointGeneration := ReplyGeneration;
+  Inc(VFSBrokerServerGeneration);
+  if VFSBrokerServerGeneration = 0 then VFSBrokerServerGeneration := 1;
   VFSBrokerRegistered := True;
   WriteText('[ OK ] Kernel VFS syscall broker registered with userland vfsd.'#13#10);
   VFSBrokerFlushRemoteCloses;
