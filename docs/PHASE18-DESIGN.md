@@ -86,8 +86,8 @@ separate validation levels.
 
 ## Scope and limitations
 
-- These are four deterministic user-mode probes, not fuzzing. This is not
-  exhaustive MMU testing or exhaustive page-table coverage.
+- These are four deterministic user-mode probes, not exhaustive MMU testing
+  or exhaustive page-table coverage; they are not fuzzing.
 - They validate the user-process exception path and parent wait/reap behavior;
   kernel-mode page faults remain fatal.
 - They do not test SMP/TLB shootdowns, demand paging, stack growth, guard-page
