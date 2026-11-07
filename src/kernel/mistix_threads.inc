@@ -3,6 +3,8 @@
 
 type
   TThreadEntry = procedure;
+  TThreadInitialStack = array[0..6] of QWord;
+  PThreadInitialStack = ^TThreadInitialStack;
   TThreadState = (tsFree, tsRunnable, tsRunning, tsBlocked, tsTerminated);
 
   TKernelThread = record
@@ -92,7 +94,7 @@ var
   I: LongWord;
   Top: QWord;
   InitialSP: QWord;
-  StackWords: PQWord;
+  StackWords: PThreadInitialStack;
 begin
   Result := False;
   ThreadId := 0;
@@ -107,16 +109,16 @@ begin
     Top := StackTopAligned(PtrUInt(@ThreadStacks[I, 0]), THREAD_STACK_SIZE);
     Dec(Top, 8); { SysV AMD64 function-entry RSP must be 8 mod 16. }
     InitialSP := Top - (7 * SizeOf(QWord));
-    StackWords := PQWord(PtrUInt(InitialSP));
+    StackWords := PThreadInitialStack(PtrUInt(InitialSP));
 
     { ContextSwitch pops r15,r14,r13,r12,rbp,rbx and RETs to bootstrap. }
-    StackWords[0] := 0; { r15 }
-    StackWords[1] := 0; { r14 }
-    StackWords[2] := 0; { r13 }
-    StackWords[3] := 0; { r12 }
-    StackWords[4] := 0; { rbp }
-    StackWords[5] := 0; { rbx }
-    StackWords[6] := PtrUInt(@ThreadBootstrap);
+    StackWords^[0] := 0; { r15 }
+    StackWords^[1] := 0; { r14 }
+    StackWords^[2] := 0; { r13 }
+    StackWords^[3] := 0; { r12 }
+    StackWords^[4] := 0; { rbp }
+    StackWords^[5] := 0; { rbx }
+    StackWords^[6] := PtrUInt(@ThreadBootstrap);
 
     ThreadTable[I].Id := NextThreadId;
     Inc(NextThreadId);
