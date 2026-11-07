@@ -52,9 +52,26 @@ begin
       end;
     'o':
       begin
+{$ifdef MISTIX_DEBUG_CHECKS}
+        WriteCString('[DEBUG] overflow probe bytes=');
+        WriteNumber(Ord(Mode[0]));
+        WriteCString(',');
+        WriteNumber(Ord(Mode[1]));
+        WriteCString(#13#10);
+        WriteCString('[DEBUG] overflow probe setting left operand.'#13#10);
+{$endif}
         LeftValue := High(LongInt);
+{$ifdef MISTIX_DEBUG_CHECKS}
+        WriteCString('[DEBUG] overflow probe setting right operand.'#13#10);
+{$endif}
         RightValue := Ord(Mode[1]);
+{$ifdef MISTIX_DEBUG_CHECKS}
+        WriteCString('[DEBUG] overflow probe adding operands.'#13#10);
+{$endif}
         ArithmeticResult := LeftValue + RightValue;
+{$ifdef MISTIX_DEBUG_CHECKS}
+        WriteCString('[DEBUG] overflow probe unexpectedly completed.'#13#10);
+{$endif}
       end;
     'd':
       begin
