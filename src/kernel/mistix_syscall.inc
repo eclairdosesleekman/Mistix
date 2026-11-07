@@ -363,12 +363,11 @@ function VFSBrokerCall(ProcessIndex, Operation: LongWord;
   const Path: array of Char): QWord;
 var
   Message: TIPCMessage;
-  I, J, PathLength: LongWord;
-  ServerRoot: QWord;
-  Payload: QWord;
-  Status: QWord;
+  I, J, PathLength, SlotIndex: LongWord;
+  PendingIndex: LongInt;
+  ServerRoot, LaneAddress: QWord;
+  Payload, Status, TransferBytes: QWord;
   FD: LongInt;
-  TransferBytes: QWord;
   Dirent: TVFSDirent;
   NameTerminated, ValidEntries, PathOperation: Boolean;
   LocalPath: array[0..VFS_PATH_MAX] of Byte;
@@ -390,42 +389,81 @@ begin
       Exit;
     end;
   end;
-  VFSBrokerPumpReplies;
-  Result := QWord(-11); { -EAGAIN: a different process owns the serial RPC slot. }
-  if VFSBrokerPending.Active <> 0 then
+
+  if ProcessIndex >= PROCESS_MAX_COUNT then
   begin
-    if VFSBrokerPending.OwnerIndex <> ProcessIndex then Exit;
-    if ProcessTable[ProcessIndex].PID <> VFSBrokerPending.OwnerPID then Exit;
-    if (VFSBrokerPending.Operation <> Operation) or
-       (VFSBrokerPending.RemoteHandle <> RemoteHandle) or
-       (VFSBrokerPending.UserBuffer <> UserBuffer) or
-       (VFSBrokerPending.ByteCount <> ByteCount) or
-       (VFSBrokerPending.Flags <> Flags) then
+    Result := QWord(-14);
+    Exit;
+  end;
+  if ProcessTable[ProcessIndex].State <> psRunning then
+  begin
+    Result := QWord(-14);
+    Exit;
+  end;
+
+  VFSBrokerPumpReplies;
+  PendingIndex := -1;
+  for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+    if (VFSBrokerPending[I].Active <> 0) and
+       (VFSBrokerPending[I].Cancelled = 0) and
+       (VFSBrokerPending[I].OwnerIndex = ProcessIndex) and
+       (VFSBrokerPending[I].OwnerPID = ProcessTable[ProcessIndex].PID) then
     begin
-      Result := QWord(-16); { -EBUSY: caller changed request while pending. }
+      PendingIndex := LongInt(I);
+      Break;
+    end;
+
+  if PendingIndex >= 0 then
+  begin
+    SlotIndex := LongWord(PendingIndex);
+    if (VFSBrokerPending[SlotIndex].Operation <> Operation) or
+       (VFSBrokerPending[SlotIndex].RemoteHandle <> RemoteHandle) or
+       (VFSBrokerPending[SlotIndex].UserBuffer <> UserBuffer) or
+       (VFSBrokerPending[SlotIndex].ByteCount <> ByteCount) or
+       (VFSBrokerPending[SlotIndex].Flags <> Flags) then
+    begin
+      Result := QWord(-16); { -EBUSY: request changed while transaction pending. }
       Exit;
     end;
     if PathOperation then
       for I := 0 to VFS_PATH_MAX do
-        if VFSBrokerPending.RequestPath[I] <> Path[I] then
+        if VFSBrokerPending[SlotIndex].RequestPath[I] <> Path[I] then
         begin
           Result := QWord(-16);
           Exit;
         end;
-    if VFSBrokerPending.Ready = 0 then Exit;
-    Status := VFSBrokerPending.ResultValue;
-    Payload := VFSBrokerPending.Payload;
+    Result := QWord(-11);
+    if VFSBrokerPending[SlotIndex].Ready = 0 then Exit;
+
+    Status := VFSBrokerPending[SlotIndex].ResultValue;
+    Payload := VFSBrokerPending[SlotIndex].Payload;
     if Status <> 0 then
     begin
-      VFSBrokerPending.Active := 0;
+      if Status = VFS_BROKER_ERR_TIMEOUT then
+      begin
+        if VFSBrokerPending[SlotIndex].CancelSent <> 0 then
+          VFSBrokerClearPending(SlotIndex)
+        else
+        begin
+          VFSBrokerPending[SlotIndex].Cancelled := 1;
+          VFSBrokerPending[SlotIndex].CancelDeadlineTick :=
+            VFSBrokerTickCounter + VFS_BROKER_CANCEL_GRACE_TICKS;
+          VFSBrokerTrySendCancel(SlotIndex);
+        end;
+      end
+      else
+        VFSBrokerClearPending(SlotIndex);
       Result := Status;
       Exit;
     end;
+
+    LaneAddress := VFS_BROKER_SHARED_BASE +
+      QWord(SlotIndex) * VFS_BROKER_SLOT_SIZE;
     case Operation of
       VFS_BROKER_OP_OPEN:
         begin
           FD := VFSAllocateRemoteFD(ProcessTable[ProcessIndex].Files,
-            Payload, LongWord(VFSBrokerPending.Flags));
+            Payload, LongWord(VFSBrokerPending[SlotIndex].Flags));
           if FD < 0 then
           begin
             VFSQueueRemoteClose(Payload);
@@ -437,7 +475,7 @@ begin
       VFS_BROKER_OP_DIR_OPEN:
         begin
           FD := VFSAllocateRemoteDirectoryFD(ProcessTable[ProcessIndex].Files,
-            Payload, LongWord(VFSBrokerPending.Flags));
+            Payload, LongWord(VFSBrokerPending[SlotIndex].Flags));
           if FD < 0 then
           begin
             VFSQueueRemoteClose(Payload);
@@ -449,7 +487,7 @@ begin
       VFS_BROKER_OP_DIR_READ:
         begin
           Result := QWord(-71); { -EPROTO }
-          if (Payload <= VFSBrokerPending.ByteCount) and
+          if (Payload <= VFSBrokerPending[SlotIndex].ByteCount) and
              (Payload <= VFS_BROKER_DIRENT_MAX) then
           begin
             Result := Payload;
@@ -461,7 +499,7 @@ begin
               else
               begin
                 ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
-                if not AddressSpaceCopyFrom(ServerRoot, VFS_BROKER_SHARED_BASE,
+                if not AddressSpaceCopyFrom(ServerRoot, LaneAddress,
                      @VFSBrokerScratch[0], TransferBytes) then
                   Result := QWord(-14)
                 else
@@ -501,8 +539,8 @@ begin
                     Result := QWord(-71)
                   else if not AddressSpaceCopyTo(
                     ProcessTable[ProcessIndex].AddressSpaceRoot,
-                    VFSBrokerPending.UserBuffer, @VFSBrokerScratch[0],
-                    TransferBytes) then
+                    VFSBrokerPending[SlotIndex].UserBuffer,
+                    @VFSBrokerScratch[0], TransferBytes) then
                     Result := QWord(-14);
                 end;
               end;
@@ -513,26 +551,28 @@ begin
         begin
           for I := 0 to VFS_PATH_MAX do
             ProcessTable[ProcessIndex].Files.CurrentDirectory[I] :=
-              VFSBrokerPending.RequestPath[I];
+              VFSBrokerPending[SlotIndex].RequestPath[I];
           Result := 0;
         end;
       VFS_BROKER_OP_READ:
         begin
           Result := Payload;
-          if Result > VFSBrokerPending.ByteCount then Result := VFSBrokerPending.ByteCount;
+          if Result > VFSBrokerPending[SlotIndex].ByteCount then
+            Result := VFSBrokerPending[SlotIndex].ByteCount;
           if Result <> 0 then
           begin
             ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
-            if not AddressSpaceCopyFrom(ServerRoot, VFS_BROKER_SHARED_BASE,
+            if not AddressSpaceCopyFrom(ServerRoot, LaneAddress,
                  @VFSBrokerScratch[0], Result) or
                not AddressSpaceCopyTo(ProcessTable[ProcessIndex].AddressSpaceRoot,
-                 VFSBrokerPending.UserBuffer, @VFSBrokerScratch[0], Result) then
+                 VFSBrokerPending[SlotIndex].UserBuffer,
+                 @VFSBrokerScratch[0], Result) then
               Result := QWord(-14);
           end;
         end;
       VFS_BROKER_OP_WRITE:
-        if Payload > VFSBrokerPending.ByteCount then
-          Result := QWord(-71) { -EPROTO }
+        if Payload > VFSBrokerPending[SlotIndex].ByteCount then
+          Result := QWord(-71)
         else
           Result := Payload;
       VFS_BROKER_OP_CLOSE:
@@ -540,35 +580,19 @@ begin
     else
       Result := QWord(-22);
     end;
-    VFSBrokerPending.Active := 0;
-    VFSBrokerPending.Ready := 0;
+    VFSBrokerClearPending(SlotIndex);
     Exit;
   end;
 
-  Result := QWord(-19); { -ENODEV }
+  Result := QWord(-19);
   if not VFSBrokerRegistered or not VFSBrokerServerAlive then Exit;
-  if (ProcessIndex >= PROCESS_MAX_COUNT) or
-     (ProcessTable[ProcessIndex].State <> psRunning) then
-  begin
-    Result := QWord(-14);
-    Exit;
-  end;
-  if (Operation = VFS_BROKER_OP_READ) or (Operation = VFS_BROKER_OP_WRITE) then
+
+  if (Operation = VFS_BROKER_OP_READ) or
+     (Operation = VFS_BROKER_OP_WRITE) then
   begin
     Result := QWord(-14);
     if (ByteCount <> 0) and not AddressSpaceValidateUserRange(
          ProcessTable[ProcessIndex].AddressSpaceRoot, UserBuffer, ByteCount) then Exit;
-    if Operation = VFS_BROKER_OP_WRITE then
-    begin
-      if ByteCount <> 0 then
-      begin
-        if not AddressSpaceCopyFrom(ProcessTable[ProcessIndex].AddressSpaceRoot,
-             UserBuffer, @VFSBrokerScratch[0], ByteCount) then Exit;
-        ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
-        if not AddressSpaceCopyTo(ServerRoot, VFS_BROKER_SHARED_BASE,
-             @VFSBrokerScratch[0], ByteCount) then Exit;
-      end;
-    end;
   end
   else if Operation = VFS_BROKER_OP_DIR_READ then
   begin
@@ -586,14 +610,58 @@ begin
     if (PathLength = 0) or (PathLength > VFS_PATH_MAX) then Exit;
     for I := 0 to High(LocalPath) do LocalPath[I] := 0;
     for I := 0 to PathLength - 1 do LocalPath[I] := Ord(Path[I]);
-    ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
-    Result := QWord(-14);
-    if not AddressSpaceCopyTo(ServerRoot, VFS_BROKER_SHARED_BASE,
-         @LocalPath[0], SizeOf(LocalPath)) then Exit;
+  end
+  else if (Operation <> VFS_BROKER_OP_CLOSE) then
+  begin
+    Result := QWord(-22);
+    Exit;
+  end;
+
+  PendingIndex := -1;
+  for I := 0 to VFS_BROKER_PENDING_MAX - 1 do
+    if VFSBrokerPending[I].Active = 0 then
+    begin
+      PendingIndex := LongInt(I);
+      Break;
+    end;
+  Result := QWord(-11); { -EAGAIN: all bounded request slots are occupied. }
+  if PendingIndex < 0 then Exit;
+  SlotIndex := LongWord(PendingIndex);
+  LaneAddress := VFS_BROKER_SHARED_BASE +
+    QWord(SlotIndex) * VFS_BROKER_SLOT_SIZE;
+  ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
+
+  { Clear the private lane before placing this request's input in it. }
+  for I := 0 to VFS_BROKER_SLOT_SIZE - 1 do
+    VFSBrokerScratch[I mod VFS_IO_MAX] := 0;
+  if Operation = VFS_BROKER_OP_WRITE then
+  begin
+    if (ByteCount <> 0) and not AddressSpaceCopyFrom(
+         ProcessTable[ProcessIndex].AddressSpaceRoot, UserBuffer,
+         @VFSBrokerScratch[0], ByteCount) then
+    begin
+      Result := QWord(-14);
+      Exit;
+    end;
+    if (ByteCount <> 0) and not AddressSpaceCopyTo(
+         ServerRoot, LaneAddress, @VFSBrokerScratch[0], ByteCount) then
+    begin
+      Result := QWord(-14);
+      Exit;
+    end;
+  end
+  else if PathOperation then
+  begin
+    if not AddressSpaceCopyTo(ServerRoot, LaneAddress,
+         @LocalPath[0], SizeOf(LocalPath)) then
+    begin
+      Result := QWord(-14);
+      Exit;
+    end;
   end;
 
   Message.MessageId := 0;
-  Message.WordCount := 4;
+  Message.WordCount := 6;
   for I := 0 to 6 do Message.Reserved[I] := 0;
   for I := 0 to IPC_MAX_WORDS - 1 do Message.Words[I] := 0;
   case Operation of
@@ -604,18 +672,11 @@ begin
     VFS_BROKER_OP_DIR_OPEN: Message.MessageId := VFS_BROKER_DIR_OPEN;
     VFS_BROKER_OP_DIR_READ: Message.MessageId := VFS_BROKER_DIR_READ;
     VFS_BROKER_OP_CHDIR: Message.MessageId := VFS_BROKER_CHDIR;
-  else
-    begin
-      Result := QWord(-22);
-      Exit;
-    end;
   end;
   if VFSBrokerNextTransaction = 0 then VFSBrokerNextTransaction := 1;
   Message.Words[0] := VFSBrokerNextTransaction;
   Message.Words[1] := ProcessTable[ProcessIndex].PID;
-  if (Operation = VFS_BROKER_OP_OPEN) or
-     (Operation = VFS_BROKER_OP_DIR_OPEN) or
-     (Operation = VFS_BROKER_OP_CHDIR) then
+  if PathOperation then
   begin
     Message.Words[2] := Flags;
     Message.Words[3] := 0;
@@ -625,30 +686,38 @@ begin
     Message.Words[2] := RemoteHandle;
     Message.Words[3] := ByteCount;
   end;
+  Message.Words[4] := SlotIndex;
+  Message.Words[5] := VFSBrokerServerGeneration;
   if not VFSBrokerQueueRequest(Message) then
   begin
     Result := QWord(-11);
     Exit;
   end;
 
-  VFSBrokerPending.Active := 1;
-  VFSBrokerPending.Ready := 0;
-  VFSBrokerPending.Operation := Operation;
-  VFSBrokerPending.OwnerIndex := ProcessIndex;
-  VFSBrokerPending.OwnerPID := ProcessTable[ProcessIndex].PID;
-  VFSBrokerPending.TransactionID := VFSBrokerNextTransaction;
-  Inc(VFSBrokerNextTransaction);
-  VFSBrokerPending.RemoteHandle := RemoteHandle;
-  VFSBrokerPending.UserBuffer := UserBuffer;
-  VFSBrokerPending.ByteCount := ByteCount;
-  VFSBrokerPending.Flags := Flags;
-  VFSBrokerPending.ResultValue := QWord(-11);
-  VFSBrokerPending.Payload := 0;
+  VFSBrokerPending[SlotIndex].Active := 1;
+  VFSBrokerPending[SlotIndex].Ready := 0;
+  VFSBrokerPending[SlotIndex].Cancelled := 0;
+  VFSBrokerPending[SlotIndex].CancelSent := 0;
+  VFSBrokerPending[SlotIndex].Operation := Operation;
+  VFSBrokerPending[SlotIndex].OwnerIndex := ProcessIndex;
+  VFSBrokerPending[SlotIndex].OwnerPID := ProcessTable[ProcessIndex].PID;
+  VFSBrokerPending[SlotIndex].TransactionID := VFSBrokerNextTransaction;
+  VFSBrokerPending[SlotIndex].ServerGeneration := VFSBrokerServerGeneration;
+  VFSBrokerPending[SlotIndex].DeadlineTick :=
+    VFSBrokerTickCounter + VFS_BROKER_TIMEOUT_TICKS;
+  VFSBrokerPending[SlotIndex].CancelDeadlineTick := 0;
+  VFSBrokerPending[SlotIndex].RemoteHandle := RemoteHandle;
+  VFSBrokerPending[SlotIndex].UserBuffer := UserBuffer;
+  VFSBrokerPending[SlotIndex].ByteCount := ByteCount;
+  VFSBrokerPending[SlotIndex].Flags := Flags;
+  VFSBrokerPending[SlotIndex].ResultValue := QWord(-11);
+  VFSBrokerPending[SlotIndex].Payload := 0;
   for I := 0 to VFS_PATH_MAX do
     if PathOperation and (I <= LongWord(High(Path))) then
-      VFSBrokerPending.RequestPath[I] := Path[I]
+      VFSBrokerPending[SlotIndex].RequestPath[I] := Path[I]
     else
-      VFSBrokerPending.RequestPath[I] := #0;
+      VFSBrokerPending[SlotIndex].RequestPath[I] := #0;
+  Inc(VFSBrokerNextTransaction);
   Result := QWord(-11);
 end;
 
