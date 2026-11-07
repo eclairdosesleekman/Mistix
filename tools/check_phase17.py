@@ -75,6 +75,19 @@ def main() -> int:
         "WriteCR3(RootPhysical)",
         "(ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical",
     ))
+    require("src/kernel/mistix_types.inc", (
+        "VMM_TEST_VIRTUAL_ADDRESS = QWord($FFFFC00000000000)",
+    ))
+    require("src/kernel/mistix_memory_object.inc", (
+        "MEMORY_OBJECT_TEST_BASE = QWord($FFFFC10000000000)",
+    ))
+    syscall_source = require("src/kernel/mistix_syscall.inc", (
+        "MISTIX_ERR_FAULT = QWord($FFFFFFFFFFFFFFF2)",
+        "MISTIX_ERR_NOSYS = QWord($FFFFFFFFFFFFFFDA)",
+        "QWord($FFFFFFFFFFFFFFF2)",
+    ))
+    if "QWord(-" in syscall_source:
+        raise SystemExit("signed negative QWord casts remain in checked kernel syscall paths")
     for source, expression in (
         ("src/kernel/mistix_memory.inc", "Words^[I] := 0;"),
         ("src/kernel/mistix_memory_object.inc", "Words^[I] := 0;"),
