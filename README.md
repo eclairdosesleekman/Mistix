@@ -181,6 +181,7 @@ Run `make phase17-check` for host-only source-contract validation. `make smoke B
 Phase 18 extends the Debug-only child-process fault suite from compiler runtime errors to x86-64 page protection:
 
 - An unmapped user page is read and written in separate child processes.
+- ELF pages are initialized in an inactive address space through a writable/NX staging mapping, then receive their final W^X/NX permissions.
 - A child attempts to write into its read-only executable text page.
 - A child writes a `RET` byte to its stack and attempts to execute it, checking the stack's NX mapping.
 - PID 1 waits for each child and checks the exact vector-14 status, including the page-fault P/W/U/I-D error bits. A normal return is treated as a test failure.
