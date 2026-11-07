@@ -68,6 +68,23 @@ def main() -> int:
         "procedure ISRCommon; assembler; nostackframe; forward",
     ))
     require("src/kernel/mistix_syscall.inc", ("jmp ISRCommon",))
+    require("src/kernel/mistix_timer.inc", ("jmp ISRCommon",))
+    require("src/kernel/mistix_address_space.inc", (
+        "function AddressSpaceActivate(RootPhysical: QWord): Boolean",
+        "WriteCR3(RootPhysical)",
+        "(ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical",
+    ))
+    for source, expression in (
+        ("src/kernel/mistix_memory.inc", "Words[I] := 0;"),
+        ("src/kernel/mistix_memory_object.inc", "Words[I] := 0;"),
+        ("src/kernel/mistix_shm.inc", "Words[J] := 0;"),
+        ("src/kernel/mistix_threads.inc", "StackWords[6] := PtrUInt(@ThreadBootstrap);"),
+    ):
+        require(source, (expression,))
+    if "VFSBrokerFlushRemoteCloses; forward;" in require(
+        "src/kernel/mistix_syscall.inc", ("procedure VFSBrokerFlushRemoteCloses;",)
+    ):
+        raise SystemExit("duplicate VFSBrokerFlushRemoteCloses forward remains in syscall include")
     require("src/kernel/mistix_main.inc", (
         "call KernelMain",
         "procedure KernelMain; cdecl",
