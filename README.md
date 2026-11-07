@@ -144,7 +144,7 @@ Phase 15 completes the runtime-checking work deferred by Phase 14:
 
 - Debug builds use FPC `-Cr -Co` and define `MISTIX_DEBUG_CHECKS`, enabling Pascal range (`{$R+}`) and integer-overflow (`{$Q+}`) checks across kernel and userland.
 - The kernel provides freestanding range/overflow handlers and a `FPC_DIVBYZERO` compatibility entry point; they emit concise diagnostics on COM1 and halt without depending on the hosted RTL.
-- Userland exports range/overflow hooks that terminate the faulting process with statuses 201 and 215. The selected x86-64 FPC compiler implements signed divide-by-zero with native `IDIV` / CPU `#DE`, which the trap dispatcher isolates as a process exception.
+- Userland exports the compiler's lowercase `fpc_rangeerror` and `fpc_overflow` hooks (plus uppercase compatibility aliases) that terminate the faulting process with statuses 201 and 215. The selected x86-64 FPC compiler implements signed divide-by-zero with native `IDIV` / CPU `#DE`, which the trap dispatcher isolates as a process exception.
 - Release builds retain the existing unchecked `{$R-}` / `{$Q-}` configuration.
 - `make phase15-check` verifies compiler flags, conditional directives, and freestanding handler wiring.
 
