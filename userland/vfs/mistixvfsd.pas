@@ -33,6 +33,9 @@ const
   VFS10_DIR_OPEN = $4D56534600000021;
   VFS10_DIR_READ = $4D56534600000022;
   VFS10_CHDIR = $4D56534600000024;
+  VFS10_CANCEL = $4D56534600000026;
+  VFS_BROKER_PENDING_MAX = 8;
+  VFS_BROKER_SLOT_SIZE = 8192;
   VFS_O_RDONLY = 0;
   VFS_O_WRONLY = 1;
   VFS_O_RDWR = 2;
@@ -383,10 +386,34 @@ var
 begin
   ClearMessage(Response);
   Response.MessageId := VFS_ERR_INVAL;
-  Response.WordCount := 3;
+  Response.WordCount := 4;
   Response.Words[0] := Request.Words[0]; { transaction ID }
   Response.Words[1] := Request.Words[1]; { requester PID }
   Response.Words[2] := 0;
+  Response.Words[3] := 0; { VFS broker server generation }
+  if Request.MessageId = VFS10_CANCEL then
+  begin
+    if (Request.WordCount < 4) or (Request.Words[0] = 0) or
+       (Request.Words[2] = 0) or
+       (Request.Words[3] >= VFS_BROKER_PENDING_MAX) then
+    begin
+      Response.MessageId := VFS_ERR_PROTO;
+      Exit;
+    end;
+    Response.MessageId := VFS10_CANCEL;
+    Response.Words[2] := 1; { cancel notification observed; late replies remain harmless }
+    Response.Words[3] := Request.Words[2];
+    Exit;
+  end;
+  if Request.Words[0] <> 0 then
+  begin
+    if Request.WordCount < 6 then
+    begin
+      Response.MessageId := VFS_ERR_PROTO;
+      Exit;
+    end;
+    Response.Words[3] := Request.Words[5];
+  end;
   case Request.MessageId of
     VFS_RPC_BROKER_OPEN:
       begin
@@ -602,9 +629,13 @@ begin
         if Requested <> 0 then
         begin
           EntryBytes := Requested * SizeOf(TMistixDirent);
-          for I := 0 to LongWord(EntryBytes) - 1 do
+          I := LongWord(EntryBytes);
+          while I <> 0 do
+          begin
+            Dec(I);
             SharedBuffer[I] := SharedBuffer[
               DirectoryPosition * SizeOf(TMistixDirent) + I];
+          end;
         end;
         Inc(OpenSlots[Slot].Position, Requested);
         Response.MessageId := 0;
@@ -729,7 +760,8 @@ begin
   if ((Request.MessageId >= VFS_RPC_BROKER_OPEN) and
       (Request.MessageId <= VFS_RPC_BROKER_CLOSE)) or
      ((Request.MessageId >= VFS10_DIR_OPEN) and
-      (Request.MessageId <= VFS10_CHDIR)) then
+      (Request.MessageId <= VFS10_CHDIR)) or
+     (Request.MessageId = VFS10_CANCEL) then
   begin
     DispatchBrokerRequest(Request, Response);
     Exit;
@@ -1030,10 +1062,64 @@ begin
   Result := True;
 end;
 
+function VFSBrokerStageRequest(const Request: TMistixIPCMessage): Boolean;
+var
+  SlotIndex, I: LongWord;
+  BufferOffset: QWord;
+begin
+  Result := False;
+  if Request.MessageId = VFS10_CANCEL then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if (Request.WordCount < 6) or
+     (Request.Words[4] >= VFS_BROKER_PENDING_MAX) or
+     (Request.Words[5] = 0) then Exit;
+  SlotIndex := LongWord(Request.Words[4]);
+  BufferOffset := QWord(SlotIndex) * VFS_BROKER_SLOT_SIZE;
+  { The broker owns one 8 KiB lane per outstanding transaction. Stage that
+    lane into the legacy base window only while this single-threaded server
+    dispatches the request. blockd continues to use the base window. }
+  if SlotIndex <> 0 then
+    for I := 0 to VFS_BROKER_SLOT_SIZE - 1 do
+      SharedBuffer[I] := SharedBuffer[BufferOffset + I];
+  Result := True;
+end;
+
+procedure VFSBrokerSaveResponse(const Request, Response: TMistixIPCMessage);
+var
+  SlotIndex, I: LongWord;
+  BufferOffset, CopyBytes: QWord;
+begin
+  if (Request.MessageId = VFS10_CANCEL) or (Request.Words[0] = 0) or
+     (Response.MessageId <> 0) or (Request.WordCount < 6) or
+     (Request.Words[4] >= VFS_BROKER_PENDING_MAX) then Exit;
+  SlotIndex := LongWord(Request.Words[4]);
+  BufferOffset := QWord(SlotIndex) * VFS_BROKER_SLOT_SIZE;
+  CopyBytes := 0;
+  if Request.MessageId = VFS_RPC_BROKER_READ then
+  begin
+    CopyBytes := Response.Words[2];
+    if CopyBytes > VFS_RPC_IO_MAX then Exit;
+  end
+  else if Request.MessageId = VFS10_DIR_READ then
+  begin
+    if Response.Words[2] > 16 then Exit;
+    CopyBytes := Response.Words[2] * SizeOf(TMistixDirent);
+  end
+  else
+    Exit;
+  if CopyBytes > VFS_BROKER_SLOT_SIZE then Exit;
+  for I := 0 to LongWord(CopyBytes) - 1 do
+    SharedBuffer[BufferOffset + I] := SharedBuffer[I];
+end;
+
 procedure MistixVFSdMain; cdecl; public name 'mistix_user_main';
 var
   Request, Response: TMistixIPCMessage;
   Status: QWord;
+  IsBrokerTransaction: Boolean;
 begin
   ImageBase := @VFSBaseImageStart;
   ImageSize := PtrUInt(@VFSBaseImageEnd) - PtrUInt(@VFSBaseImageStart);
@@ -1057,7 +1143,33 @@ begin
       SysYield;
       Continue;
     end;
-    DispatchRequest(Request, Response);
+    IsBrokerTransaction :=
+      (Request.Words[0] <> 0) and
+      (((Request.MessageId >= VFS_RPC_BROKER_OPEN) and
+        (Request.MessageId <= VFS_RPC_BROKER_CLOSE)) or
+       ((Request.MessageId >= VFS10_DIR_OPEN) and
+        (Request.MessageId <= VFS10_CHDIR)));
+    if IsBrokerTransaction then
+    begin
+      if VFSBrokerStageRequest(Request) then
+      begin
+        DispatchRequest(Request, Response);
+        VFSBrokerSaveResponse(Request, Response);
+      end
+      else
+      begin
+        ClearMessage(Response);
+        Response.MessageId := VFS_ERR_PROTO;
+        Response.WordCount := 4;
+        Response.Words[0] := Request.Words[0];
+        Response.Words[1] := Request.Words[1];
+        Response.Words[2] := 0;
+        if Request.WordCount >= 6 then
+          Response.Words[3] := Request.Words[5];
+      end;
+    end
+    else
+      DispatchRequest(Request, Response);
     repeat
       Status := SysIPCSend(ReplyEndpoint, PtrUInt(@Response));
       if Status = MISTIX_EAGAIN then SysYield
