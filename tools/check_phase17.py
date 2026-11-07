@@ -41,7 +41,7 @@ def main() -> int:
     require("userland/tests/mistixruntimefault.pas", (
         "TProbeIndex = 0..3",
         "ProbeTable[IndexValue] := Byte(IndexValue)",
-        "LeftValue := High(LongInt)",
+        "LeftValue := High(Int64)",
         "ArithmeticResult := LeftValue + RightValue",
         "Denominator := Ord(Mode[2]) - Ord(Mode[2])",
         "Numerator div Denominator",
