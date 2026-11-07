@@ -61,6 +61,16 @@ def main() -> int:
         "ProcessTerminateCurrent(Frame, ExitCode)",
         "if (Frame^.CS and 3) = 3 then",
     ))
+    require("src/kernel/mistix_cpu.inc", (
+        "jmp ISRCommon",
+        "call TrapDispatch",
+        "procedure ISRCommon; assembler",
+    ))
+    require("src/kernel/mistix_syscall.inc", ("jmp ISRCommon",))
+    require("src/kernel/mistix_main.inc", (
+        "call KernelMain",
+        "procedure KernelMain; cdecl",
+    ))
     require("userland/init/mistixinit.pas", (
         "VFS_RPC_READDIR = $4D5653460000000A",
         "call MistixInitMain",
