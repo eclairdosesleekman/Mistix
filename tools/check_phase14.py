@@ -59,9 +59,9 @@ def main() -> int:
     require("docs/PHASE14-DESIGN.md", (
         "Debug and release profiles",
         "MFS1 image-builder tests",
-        "headless QEMU boot smoke test",
+        "headless x86-64 QEMU boot smoke test",
         "does not enable Pascal range or overflow checks",
-        "not a hardware compatibility claim",
+        "hardware compatibility claim",
     ))
     print("[ OK ] Build profiles use isolated output directories and debug symbols.")
     print("[ OK ] Phase 10–14 source checks and Python tooling tests are wired.")
