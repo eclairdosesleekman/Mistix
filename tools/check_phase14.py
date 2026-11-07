@@ -46,7 +46,7 @@ def main() -> int:
     require(".github/workflows/ci.yml", (
         "pull_request:", "push:", "workflow_dispatch:",
         "make test", "make release", "make debug", "make smoke",
-        "qemu-system-x86", "mistix-binary.tar.gz",
+        "qemu-system-x86", "limine-binary.tar.gz",
         "b38aabb042b0c0f9f562b7741be3c1204838d7bbacfa78bb411c674bd5b984ee",
         "actions/upload-artifact@v4",
     ))
