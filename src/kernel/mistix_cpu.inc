@@ -223,6 +223,8 @@ begin
 {$endif}
 end;
 
+{$push}
+{$R-} { TSS descriptor bit packing must preserve unsigned high address bits. }
 procedure BuildTSSDescriptor;
 var
   BaseAddress: QWord;
@@ -239,6 +241,7 @@ begin
     (((BaseAddress shr 24) and $FF) shl 56);
   GDT[10] := BaseAddress shr 32;
 end;
+{$pop}
 
 procedure SetIDTGate(Vector: LongWord; HandlerAddress: QWord; ISTIndex: Byte);
 var
