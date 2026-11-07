@@ -186,7 +186,7 @@ def main() -> int:
         fail("blockd must start before vfsd")
 
     makefile = require(ROOT / "Makefile", (
-        "mistix-phase9.iso", "mistix_vfs.inc", "mistix_syscall.inc",
+        "mistix.iso", "mistix_vfs.inc", "mistix_syscall.inc",
         "vfsd.elf", "blockd.elf", "userland/vfs/mistix_ext2_client.inc",
         "Mistix Phase 9", "$(QEMU) -M pc",
     ))
