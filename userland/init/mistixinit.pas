@@ -39,6 +39,7 @@ const
   VFS_RPC_WRITE = $4D56534600000007;
   VFS_RPC_UNLINK = $4D56534600000008;
   VFS_RPC_MOUNT_EXT2 = $4D56534600000009;
+  VFS_RPC_READDIR = $4D5653460000000A;
   BLOCK_RPC_INFO  = $4D424C4B00000001;
   BLOCK_RPC_READ  = $4D424C4B00000002;
   BLOCK_RPC_WRITE = $4D424C4B00000003;
@@ -570,7 +571,7 @@ end;
 procedure MistixInitEntry; assembler; nostackframe; public name '_start';
 asm
   and rsp, -16
-  call mistix_user_main
+  call MistixInitMain
   xor edi, edi
   mov eax, 2
   int $80
