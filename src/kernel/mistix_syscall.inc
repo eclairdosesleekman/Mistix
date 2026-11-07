@@ -523,22 +523,47 @@ begin
       if MatchIndex >= VFS_BROKER_PENDING_MAX then Continue;
       if VFSBrokerPending[MatchIndex].Cancelled <> 0 then
       begin
-        if (Message.MessageId = VFS_BROKER_CANCEL) and
-           (Message.WordCount >= 4) and
+        if (Message.WordCount >= 4) and
            (Message.Words[1] = VFSBrokerPending[MatchIndex].OwnerPID) and
            (Message.Words[3] = VFSBrokerPending[MatchIndex].ServerGeneration) then
-          VFSBrokerClearPending(MatchIndex)
-        else if (Message.MessageId <> VFS_BROKER_CANCEL) and
-                (Message.WordCount >= 4) and
-                (Message.Words[1] = VFSBrokerPending[MatchIndex].OwnerPID) and
-                (Message.Words[3] = VFSBrokerPending[MatchIndex].ServerGeneration) then
         begin
-          if (Message.MessageId = 0) and
-             ((VFSBrokerPending[MatchIndex].Operation = VFS_BROKER_OP_OPEN) or
-              (VFSBrokerPending[MatchIndex].Operation = VFS_BROKER_OP_DIR_OPEN)) and
-             (Message.Words[2] <> 0) then
-            VFSQueueRemoteClose(Message.Words[2]);
-          VFSBrokerClearPending(MatchIndex);
+          if (Message.MessageId = VFS_BROKER_CANCEL) then
+          begin
+            if (VFSBrokerPending[MatchIndex].OwnerIndex < PROCESS_MAX_COUNT) and
+               (ProcessTable[VFSBrokerPending[MatchIndex].OwnerIndex].PID =
+                 VFSBrokerPending[MatchIndex].OwnerPID) and
+               (ProcessTable[VFSBrokerPending[MatchIndex].OwnerIndex].State <> psZombie) and
+               (ProcessTable[VFSBrokerPending[MatchIndex].OwnerIndex].State <> psFree) and
+               (VFSBrokerPending[MatchIndex].TimeoutDelivered = 0) then
+            begin
+              VFSBrokerPending[MatchIndex].Ready := 1;
+              VFSBrokerPending[MatchIndex].ResultValue := VFS_BROKER_ERR_TIMEOUT;
+              VFSBrokerPending[MatchIndex].Payload := 0;
+            end
+            else
+              VFSBrokerClearPending(MatchIndex);
+          end
+          else
+          begin
+            if (Message.MessageId = 0) and
+               ((VFSBrokerPending[MatchIndex].Operation = VFS_BROKER_OP_OPEN) or
+                (VFSBrokerPending[MatchIndex].Operation = VFS_BROKER_OP_DIR_OPEN)) and
+               (Message.Words[2] <> 0) then
+              VFSQueueRemoteClose(Message.Words[2]);
+            if (VFSBrokerPending[MatchIndex].OwnerIndex < PROCESS_MAX_COUNT) and
+               (ProcessTable[VFSBrokerPending[MatchIndex].OwnerIndex].PID =
+                 VFSBrokerPending[MatchIndex].OwnerPID) and
+               (ProcessTable[VFSBrokerPending[MatchIndex].OwnerIndex].State <> psZombie) and
+               (ProcessTable[VFSBrokerPending[MatchIndex].OwnerIndex].State <> psFree) and
+               (VFSBrokerPending[MatchIndex].TimeoutDelivered = 0) then
+            begin
+              VFSBrokerPending[MatchIndex].Ready := 1;
+              VFSBrokerPending[MatchIndex].ResultValue := VFS_BROKER_ERR_TIMEOUT;
+              VFSBrokerPending[MatchIndex].Payload := 0;
+            end
+            else
+              VFSBrokerClearPending(MatchIndex);
+          end;
         end;
         Continue;
       end;
