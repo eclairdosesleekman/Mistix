@@ -34,7 +34,7 @@ underflow/overflow checks, updates the server-side open slot, and returns the
 new position in response word 2. No additional lane copy-back is needed.
 
 Because the cursor belongs to the server-side open slot, duplicated local
-descriptors that reference the same remote handle share the same file offset.
+descriptors that reference the same remote handle share one shared file offset.
 The single-threaded `vfsd` serializes the update along with READ and WRITE.
 
 ## Local VFS behavior
