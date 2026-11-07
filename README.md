@@ -264,7 +264,7 @@ make test
 
 These Python checks verify selected source structure, ABI constants, and wiring between the kernel and userland services. They are **static checks**, not runtime tests.
 
-The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
+The Phase 11–13 design notes explicitly mark **FPC real compilation**, ISO generation, and QEMU boot/runtime validation as **unidentified（未確認）** for those milestones. A passing source-contract check does not prove that the kernel compiles, the ISO boots, or a service works under load. Re-run the full build and emulator tests when validating a new revision.
 
 ## Repository layout
 
