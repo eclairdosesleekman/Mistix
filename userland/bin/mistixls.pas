@@ -52,7 +52,7 @@ end;
 procedure MistixLSEntry; assembler; nostackframe; public name '_start';
 asm
   and rsp, -16
-  call mistix_user_main
+  call MistixLSMain
   xor edi, edi
   mov eax, 2
   int $80
