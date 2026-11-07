@@ -539,11 +539,23 @@ begin
     Exit;
   end;
   MemoryHHDMOffset := HHDMOffset;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] MemoryInitialize: HHDM offset stored.'#13#10);
+{$endif}
   if not PMMInitialize(Memmap) then
     Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] MemoryInitialize: PMM initialized.'#13#10);
+{$endif}
   if not VMMInitialize then
     Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] MemoryInitialize: VMM initialized.'#13#10);
+{$endif}
   if not MemorySelfTest then
     Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] MemoryInitialize: self-test passed.'#13#10);
+{$endif}
   Result := True;
 end;
