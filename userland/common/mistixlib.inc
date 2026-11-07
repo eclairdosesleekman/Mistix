@@ -423,7 +423,13 @@ begin
   SysExit(201);
 end;
 
-procedure MistixFPCOverflow; cdecl; public name 'FPC_OVERFLOW';
+procedure MistixFPCOverflow; cdecl; public name 'fpc_overflow';
+begin
+  SysExit(215);
+end;
+
+{ Preserve the uppercase runtime ABI spelling for compatibility. }
+procedure MistixFPCOverflowCompat; cdecl; public name 'FPC_OVERFLOW';
 begin
   SysExit(215);
 end;
