@@ -16,10 +16,10 @@ profile.
 Both profiles retain `-O-`. Release omits debug information; debug adds FPC
 debug information (`-g`) without implicitly linking the LineInfo RTL unit.
 
-At the Phase 14 baseline, debug mode **does not enable Pascal range or overflow
-checks** because the freestanding runtime handlers had not yet been added.
-Phase 15 completes that deferred work: debug builds now enable range and
-integer-overflow checking and provide Mistix-owned fatal handlers. See
+At the Phase 14 baseline, debug mode does not enable Pascal range or overflow checks
+because freestanding runtime handlers had not yet been added. Phase 15 completes
+that deferred work: debug builds now enable range and integer-overflow checking
+and provide Mistix-owned fatal handlers. See
 [docs/PHASE15-DESIGN.md](PHASE15-DESIGN.md).
 
 Convenience targets:
