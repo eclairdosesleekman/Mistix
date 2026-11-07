@@ -14,7 +14,7 @@ compiler diagnostics cannot silently reuse objects produced by the other
 profile.
 
 Both profiles currently retain `-O-`. Release omits debug information; debug
-adds FPC debug and line-information symbols (`-g -gl`). Debug mode
+adds FPC debug information (`-g`) without implicitly linking the LineInfo RTL unit. Debug mode
 **does not enable Pascal range or overflow checks**: the freestanding kernel
 and userland do not yet provide the runtime error handlers those switches may
 require. Enabling those checks is a separate task once Mistix has its own
