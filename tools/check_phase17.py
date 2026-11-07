@@ -75,10 +75,10 @@ def main() -> int:
         "(ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical",
     ))
     for source, expression in (
-        ("src/kernel/mistix_memory.inc", "Words[I] := 0;"),
-        ("src/kernel/mistix_memory_object.inc", "Words[I] := 0;"),
-        ("src/kernel/mistix_shm.inc", "Words[J] := 0;"),
-        ("src/kernel/mistix_threads.inc", "StackWords[6] := PtrUInt(@ThreadBootstrap);"),
+        ("src/kernel/mistix_memory.inc", "Words^[I] := 0;"),
+        ("src/kernel/mistix_memory_object.inc", "Words^[I] := 0;"),
+        ("src/kernel/mistix_shm.inc", "Words^[J] := 0;"),
+        ("src/kernel/mistix_threads.inc", "StackWords^[6] := PtrUInt(@ThreadBootstrap);"),
     ):
         require(source, (expression,))
     if "VFSBrokerFlushRemoteCloses; forward;" in require(
