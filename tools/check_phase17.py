@@ -78,13 +78,20 @@ def main() -> int:
     require("src/kernel/mistix_types.inc", (
         "VMM_TEST_VIRTUAL_ADDRESS = QWord($FFFFC00000000000)",
     ))
+    require("src/kernel/mistix_types.inc", (
+        "{$push}", "{$R-}", "LimineRequests: TLimineRequestBlock = (",
+        "public name 'limine_request_block'", "{$pop}",
+    ))
     require("src/kernel/mistix_memory_object.inc", (
         "MEMORY_OBJECT_TEST_BASE = QWord($FFFFC10000000000)",
     ))
     syscall_source = require("src/kernel/mistix_syscall.inc", (
         "MISTIX_ERR_FAULT = QWord($FFFFFFFFFFFFFFF2)",
-        "MISTIX_ERR_NOSYS = QWord($FFFFFFFFFFFFFFDA)",
-        "QWord($FFFFFFFFFFFFFFF2)",
+        "MISTIX_ERR_NOSYS = not QWord(37)",
+        "MISTIX_ERR_FAULT = not QWord(13)",
+        "MISTIX_ERR_INVAL = not QWord(21)",
+        "MISTIX_ERR_NOMEM = not QWord(11)",
+        "MISTIX_ERR_BUSY = not QWord(15)",
     ))
     if "QWord(-" in syscall_source:
         raise SystemExit("signed negative QWord casts remain in checked kernel syscall paths")
