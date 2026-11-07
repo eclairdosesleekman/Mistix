@@ -384,7 +384,17 @@ begin
   WriteText('[DEBUG] ProcessCreateFromELF: user stack created.'#13#10);
   WriteText('[DEBUG] ProcessCreateFromELF: populating process slot.'#13#10);
 {$endif}
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: slot='); WriteDecimal(Slot);
+  WriteText(' pid-next='); WriteDecimal(NextProcessId);
+  WriteText(' kernel-stack-top='); WriteHex64(ProcessTable[Slot].KernelStackTop);
+  WriteText(#13#10);
+{$endif}
+  if Slot >= PROCESS_MAX_COUNT then Exit;
   ProcessTable[Slot].PID := NextProcessId;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: PID set.'#13#10);
+{$endif}
   Inc(NextProcessId);
   if NextProcessId = 0 then NextProcessId := 1;
   ProcessTable[Slot].ParentPID := ParentPID;
@@ -397,10 +407,22 @@ begin
   ProcessTable[Slot].WaitStatusAddress := 0;
   ProcessTable[Slot].ReapRequested := 0;
   ProcessTable[Slot].PendingCapabilityCount := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: scalar fields set.'#13#10);
+{$endif}
   ProcessCapabilitySpaceInitialize(ProcessTable[Slot].Capabilities);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: capability space initialized.'#13#10);
+{$endif}
   VFSProcessInitialize(ProcessTable[Slot].Files);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: VFS state initialized.'#13#10);
+{$endif}
   ProcessTable[Slot].CommandLine[0] := #0;
   ProcessInitializeFrame(Slot);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: initial frame created.'#13#10);
+{$endif}
   PID := ProcessTable[Slot].PID;
 
   WriteText('[ OK ] Created user process pid=');
