@@ -352,14 +352,27 @@ begin
   if (Image = nil) or (ImageSize = 0) or
      (ImageSize > PROCESS_MAX_USER_IMAGE_SIZE) then Exit;
   if not ProcessFindFreeSlot(Slot) then Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: free slot found.'#13#10);
+{$endif}
 
   if not AddressSpaceCreate(RootPhysical) then Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: address space created.'#13#10);
+{$endif}
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: entering ELF loader.'#13#10);
+{$endif}
   if not AddressSpaceLoadELF64(RootPhysical, Image, ImageSize, Entry) then
   begin
     AddressSpaceDestroy(RootPhysical);
     WriteText('[FAIL] ELF64 loader rejected a user process image.'#13#10);
     Exit;
   end;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: ELF loader completed.'#13#10);
+  WriteText('[DEBUG] ProcessCreateFromELF: creating user stack.'#13#10);
+{$endif}
   if not AddressSpaceCreateUserStack(RootPhysical, UserStack) then
   begin
     AddressSpaceDestroy(RootPhysical);
@@ -367,6 +380,10 @@ begin
     Exit;
   end;
 
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ProcessCreateFromELF: user stack created.'#13#10);
+  WriteText('[DEBUG] ProcessCreateFromELF: populating process slot.'#13#10);
+{$endif}
   ProcessTable[Slot].PID := NextProcessId;
   Inc(NextProcessId);
   if NextProcessId = 0 then NextProcessId := 1;
