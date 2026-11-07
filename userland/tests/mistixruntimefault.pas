@@ -18,9 +18,9 @@ type
 var
   ProbeTable: array[TProbeIndex] of Byte;
   IndexValue: LongInt;
-  LeftValue: LongInt;
-  RightValue: LongInt;
-  ArithmeticResult: LongInt;
+  LeftValue: Int64;
+  RightValue: Int64;
+  ArithmeticResult: Int64;
   Numerator: LongInt;
   Denominator: LongInt;
   DivisionResult: LongInt;
@@ -60,7 +60,7 @@ begin
         WriteCString(#13#10);
         WriteCString('[DEBUG] overflow probe setting left operand.'#13#10);
 {$endif}
-        LeftValue := High(LongInt);
+        LeftValue := High(Int64);
 {$ifdef MISTIX_DEBUG_CHECKS}
         WriteCString('[DEBUG] overflow probe setting right operand.'#13#10);
 {$endif}
