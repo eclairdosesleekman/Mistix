@@ -30,6 +30,15 @@ const
   RuntimeRangeName: array[0..5] of Char = 'range'#0;
   RuntimeOverflowName: array[0..8] of Char = 'overflow'#0;
   RuntimeDivideName: array[0..6] of Char = 'divide'#0;
+  RuntimePageReadArgs: array[0..2] of Char = 'pr'#0;
+  RuntimePageWriteArgs: array[0..2] of Char = 'pw'#0;
+  RuntimePageTextWriteArgs: array[0..2] of Char = 'pt'#0;
+  RuntimePageExecNXArgs: array[0..2] of Char = 'px'#0;
+  RuntimePageReadName: array[0..9] of Char = 'page-read'#0;
+  RuntimePageWriteName: array[0..10] of Char = 'page-write'#0;
+  RuntimePageTextWriteName: array[0..10] of Char = 'text-write'#0;
+  RuntimePageExecNXName: array[0..13] of Char = 'stack-nx-exec'#0;
+  PAGE_FAULT_STATUS_BASE = QWord($8000000000000000) or (QWord(14) shl 32);
 
   VFS_RPC_PING  = $4D56534600000001;
   VFS_RPC_OPEN  = $4D56534600000002;
@@ -506,7 +515,7 @@ begin
   end;
   if Status <> ExpectedStatus then
   begin
-    WriteCString('[FAIL] Phase 17 runtime-fault status mismatch for ');
+    WriteCString('[FAIL] Runtime-fault status mismatch for ');
     WriteCString(CaseName);
     WriteCString(': expected ');
     WriteNumber(ExpectedStatus);
@@ -530,6 +539,17 @@ begin
   if not RunRuntimeFaultCase(RuntimeDivideArgs, RuntimeDivideName,
        QWord($8000000000000000)) then Exit;
   WriteCString('[ OK ] Phase 17 runtime fault isolation tests passed.'#13#10);
+
+  { x86 page-fault error bits: P=1, W/R=2, U/S=4, I/D=16. }
+  if not RunRuntimeFaultCase(RuntimePageReadArgs, RuntimePageReadName,
+       PAGE_FAULT_STATUS_BASE or 4) then Exit;
+  if not RunRuntimeFaultCase(RuntimePageWriteArgs, RuntimePageWriteName,
+       PAGE_FAULT_STATUS_BASE or 6) then Exit;
+  if not RunRuntimeFaultCase(RuntimePageTextWriteArgs, RuntimePageTextWriteName,
+       PAGE_FAULT_STATUS_BASE or 7) then Exit;
+  if not RunRuntimeFaultCase(RuntimePageExecNXArgs, RuntimePageExecNXName,
+       PAGE_FAULT_STATUS_BASE or $15) then Exit;
+  WriteCString('[ OK ] Phase 18 user-mode page-fault isolation tests passed.'#13#10);
   Result := True;
 end;
 {$endif}
