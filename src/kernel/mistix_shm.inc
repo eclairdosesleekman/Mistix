@@ -110,7 +110,7 @@ begin
       Exit;
     end;
     Words := PQWord(PtrUInt(MemoryHHDMOffset + Physical[I]));
-    for J := 0 to 511 do Words^[J] := 0;
+    for J := 0 to 511 do Words[J] := 0;
   end;
 
   Generation := P7SharedObjects[ObjectIndex].Generation + 1;
