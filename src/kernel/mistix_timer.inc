@@ -17,7 +17,7 @@ procedure TimerISR; assembler; nostackframe; public name 'mistix_timer_isr';
 asm
   push 0
   push 32
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure TimerPicAcknowledge;
