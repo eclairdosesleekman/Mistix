@@ -86,7 +86,6 @@ def main() -> int:
         "MEMORY_OBJECT_TEST_BASE = QWord($FFFFC10000000000)",
     ))
     syscall_source = require("src/kernel/mistix_syscall.inc", (
-        "MISTIX_ERR_FAULT = QWord($FFFFFFFFFFFFFFF2)",
         "MISTIX_ERR_NOSYS = not QWord(37)",
         "MISTIX_ERR_FAULT = not QWord(13)",
         "MISTIX_ERR_INVAL = not QWord(21)",
