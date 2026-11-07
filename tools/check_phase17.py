@@ -35,6 +35,7 @@ def main() -> int:
         "public name 'FPC_DIVBYZERO'",
         "public name 'FPC_RANGEERROR'",
         "public name 'FPC_OVERFLOW'",
+        "public name 'fpc_overflow'",
         "SysExit(200)", "SysExit(201)", "SysExit(215)",
     ))
     require("userland/tests/mistixruntimefault.pas", (
