@@ -23,6 +23,8 @@ def main() -> int:
         "phase18-check:",
         "tools/check_phase18.py",
         "User page-fault isolation marker missing",
+        "qemu_status=$?; set -e",
+        "if [ $qemu_status -ne 124 ] && [ $qemu_status -ne 0 ]",
         '[ "$(BUILD_TYPE)" = "debug" ]',
     ))
     if makefile.count("tools/check_phase18.py") != 2:
