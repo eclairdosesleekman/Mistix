@@ -243,19 +243,6 @@ phase12-check:
 
 phase13-check:
 	$(PYTHON) tools/check_phase13.py
-	$(PYTHON) tools/check_phase14.py
 
-check-python:
-	$(PYTHON) -m compileall -q tools
-	$(PYTHON) -m unittest discover -s tools/tests -p 'test_*.py' -v
-
-test: check-source check-python
-
-check-build-tools:
-	@command -v $(FPC) >/dev/null || { echo 'Missing Free Pascal Compiler (fpc)'; exit 1; }
-	@command -v $(LD) >/dev/null || { echo 'Missing GNU ld'; exit 1; }
-	@command -v $(NM) >/dev/null || { echo 'Missing nm'; exit 1; }
-	@command -v $(READELF) >/dev/null || { echo 'Missing readelf'; exit 1; }
-	@command -v $(PYTHON) >/dev/null || { echo 'Missing python3'; exit 1; }
 phase14-check:
 	$(PYTHON) tools/check_phase14.py
