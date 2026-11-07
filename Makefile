@@ -64,7 +64,7 @@ KERNEL_SOURCES := \
 
 COMMON_INC := userland/common/mistixlib.inc
 
-.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check phase16-check phase17-check fpc-runtime-check
+.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check phase16-check phase17-check phase18-check fpc-runtime-check
 
 all: check-build-tools test user-verify kernel verify
 
@@ -84,6 +84,7 @@ check-source:
 	$(PYTHON) tools/check_phase15.py
 	$(PYTHON) tools/check_phase16.py
 	$(PYTHON) tools/check_phase17.py
+	$(PYTHON) tools/check_phase18.py
 
 check-python:
 	$(PYTHON) -m compileall -q tools
@@ -237,6 +238,7 @@ smoke: iso
 	echo "Mistix headless QEMU boot smoke test passed."
 	@if [ "$(BUILD_TYPE)" = "debug" ]; then \
 	  grep -F "[ OK ] Phase 17 runtime fault isolation tests passed." "$(SMOKE_LOG)" >/dev/null || { echo "Runtime-fault isolation marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
+  grep -F "[ OK ] Phase 18 user-mode page-fault isolation tests passed." "$(SMOKE_LOG)" >/dev/null || { echo "User page-fault isolation marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
 	fi
 
 debug:
@@ -271,6 +273,9 @@ phase16-check:
 
 phase17-check:
 	$(PYTHON) tools/check_phase17.py
+
+phase18-check:
+	$(PYTHON) tools/check_phase18.py
 
 fpc-runtime-check:
 	$(PYTHON) tools/check_fpc_runtime.py
