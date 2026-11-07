@@ -40,6 +40,7 @@ def main() -> int:
 
     require("src/kernel/mistix_runtime.inc", (
         "public name 'FPC_RANGEERROR'",
+        "public name 'fpc_rangeerror'",
         "public name 'FPC_OVERFLOW'",
         "public name 'FPC_DIVBYZERO'",
         "MistixRuntimePanic(201)",
@@ -54,6 +55,7 @@ def main() -> int:
         "{$R+}", "{$Q+}", "{$R-}", "{$Q-}",
         "public name 'FPC_DIVBYZERO'",
         "public name 'FPC_RANGEERROR'",
+        "public name 'fpc_rangeerror'",
         "public name 'FPC_OVERFLOW'",
         "SysExit(200)", "SysExit(201)", "SysExit(215)",
         "mov eax, MISTIX_SYSCALL_EXIT", "int $80", "ud2",
