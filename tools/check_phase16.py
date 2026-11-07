@@ -38,7 +38,7 @@ def main() -> int:
     ))
     require("tools/check_fpc_runtime.py", (
         "-Tlinux", "-Px86_64", "-Cn", "-O-", "-Cr", "-Co",
-        "FPC_RANGEERROR", "FPC_OVERFLOW", "OBJDUMP",
+        "fpc_rangeerror", "FPC_OVERFLOW", "OBJDUMP",
         "objdump_command + [", "SIGNED_DIVISION", "TemporaryDirectory",
     ))
     require("docs/PHASE16-DESIGN.md", (
