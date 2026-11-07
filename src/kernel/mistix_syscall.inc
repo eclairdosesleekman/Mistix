@@ -188,7 +188,6 @@ asm
 end;
 
 procedure VFSBrokerInitialize; forward;
-procedure VFSBrokerInitialize; forward;
 procedure VFSBrokerPumpReplies; forward;
 function VFSBrokerHasActiveRequests: Boolean; forward;
 
@@ -568,7 +567,8 @@ begin
           (ProcessTable[VFSBrokerPending[I].OwnerIndex].State <> psFree);
       if not OwnerAlive then
       begin
-        if VFSBrokerPending[I].Ready <> 0 then
+        if (VFSBrokerPending[I].Ready <> 0) and
+           (VFSBrokerPending[I].ResultValue <> VFS_BROKER_ERR_TIMEOUT) then
         begin
           if (VFSBrokerPending[I].ResultValue = 0) and
              ((VFSBrokerPending[I].Operation = VFS_BROKER_OP_OPEN) or
