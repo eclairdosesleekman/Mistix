@@ -7,6 +7,9 @@ const
   MISTIX_O_RDWR = 2;
   MISTIX_O_CREAT = $40;
   MISTIX_O_DIRECTORY = $100;
+  MISTIX_SEEK_SET = 0;
+  MISTIX_SEEK_CUR = 1;
+  MISTIX_SEEK_END = 2;
   MISTIX_SYSCALL_WRITE = 1;
   MISTIX_SYSCALL_EXIT = 2;
   MISTIX_SYSCALL_GETPID = 3;
@@ -42,6 +45,7 @@ const
   MISTIX_SYSCALL_BLOCK_INFO = 29;
   MISTIX_SYSCALL_BLOCK_READ = 30;
   MISTIX_SYSCALL_VFS_REGISTER = 31;
+  MISTIX_SYSCALL_LSEEK = 32;
   MISTIX_SHM_DEFAULT_BASE = QWord($0000500000000000);
 
 type
@@ -83,6 +87,12 @@ asm
   int $80
 end;
 
+function SysLseekRaw(FD: QWord; Offset: Int64; Whence: QWord): QWord;
+  assembler; nostackframe;
+asm
+  mov eax, MISTIX_SYSCALL_LSEEK
+  int $80
+end;
 function SysCloseRaw(FD: QWord): QWord; assembler; nostackframe;
 asm
   mov rdi, rdi
@@ -262,6 +272,18 @@ begin
   until Retry >= 1000000;
 end;
 
+function SysLseek(FD: QWord; Offset: Int64; Whence: QWord): QWord;
+var
+  Retry: LongWord;
+begin
+  Retry := 0;
+  repeat
+    Result := SysLseekRaw(FD, Offset, Whence);
+    if Result <> MISTIX_EAGAIN then Exit;
+    SysYield;
+    Inc(Retry);
+  until Retry >= 1000000;
+end;
 function SysClose(FD: QWord): QWord;
 var
   Retry: LongWord;
