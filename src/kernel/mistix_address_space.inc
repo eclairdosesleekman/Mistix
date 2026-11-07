@@ -571,10 +571,16 @@ begin
   Result := False;
   EntryPoint := 0;
   EntryPointExecutable := False;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ELF loader: entered.'#13#10);
+{$endif}
   if (Image = nil) or (ImageSize < SizeOf(TElf64Header)) then Exit;
   { Ring-3 data/code separation is mandatory for this phase. }
   if not CPUHasNXSupport then Exit;
   Header := PElf64Header(Image);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ELF loader: header pointer set.'#13#10);
+{$endif}
   if (Header^.Ident[0] <> ELF_MAGIC_0) or
      (Header^.Ident[1] <> ELF_MAGIC_1) or
      (Header^.Ident[2] <> ELF_MAGIC_2) or
@@ -593,13 +599,27 @@ begin
   if Header^.ProgramHeaderOffset > ImageSize then Exit;
   if QWord(Header^.ProgramHeaderCount) >
      (ImageSize - Header^.ProgramHeaderOffset) div SizeOf(TElf64ProgramHeader) then Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ELF loader: header validated; phnum=');
+  WriteDecimal(Header^.ProgramHeaderCount);
+  WriteText(#13#10);
+{$endif}
 
   ImagePageCount := 0;
   LoadableSegmentCount := 0;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] ELF loader: scanning program headers.'#13#10);
+{$endif}
   for I := 0 to Header^.ProgramHeaderCount - 1 do
   begin
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: phdr '); WriteDecimal(I); WriteText(#13#10);
+{$endif}
     ProgramHeader := PElf64ProgramHeader(PtrUInt(Image) +
       Header^.ProgramHeaderOffset + QWord(I) * SizeOf(TElf64ProgramHeader));
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: phdr pointer set.'#13#10);
+{$endif}
     if (ProgramHeader^.SegmentType = ELF_PT_DYNAMIC) or
        (ProgramHeader^.SegmentType = ELF_PT_INTERP) or
        (ProgramHeader^.SegmentType = ELF_PT_TLS) then Exit;
@@ -632,6 +652,9 @@ begin
     if SegmentEnd > High(QWord) - (PAGE_SIZE - 1) then Exit;
     EndPage := (SegmentEnd + PAGE_SIZE - 1) and PAGE_MASK;
     if EndPage <= FirstPage then Exit;
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: page range validated.'#13#10);
+{$endif}
     ImagePageCount := ImagePageCount + ((EndPage - FirstPage) div PAGE_SIZE);
     if ImagePageCount > ELF_MAX_IMAGE_PAGES then Exit;
 
@@ -645,6 +668,9 @@ begin
       permissions are applied only after file bytes have been copied, so RX
       text can be initialized without ever exposing a writable+executable PTE. }
     StagingFlags := PTE_USER or PTE_WRITABLE or PTE_NO_EXECUTE;
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: mapping staging pages.'#13#10);
+{$endif}
     PageAddress := FirstPage;
     while PageAddress < EndPage do
     begin
@@ -652,6 +678,9 @@ begin
                                      StagingFlags) then Exit;
       Inc(PageAddress, PAGE_SIZE);
     end;
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: staging pages mapped.'#13#10);
+{$endif}
 
     if ProgramHeader^.FileSize <> 0 then
     begin
@@ -659,6 +688,9 @@ begin
       if not AddressSpaceCopyTo(RootPhysical, ProgramHeader^.VirtualAddress,
                                 FileSource, ProgramHeader^.FileSize) then Exit;
     end;
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: segment bytes copied.'#13#10);
+{$endif}
 
     PageAddress := FirstPage;
     while PageAddress < EndPage do
@@ -667,6 +699,9 @@ begin
                                       PageFlags) then Exit;
       Inc(PageAddress, PAGE_SIZE);
     end;
+{$ifdef MISTIX_DEBUG_CHECKS}
+    WriteText('[DEBUG] ELF loader: final page permissions set.'#13#10);
+{$endif}
     Inc(LoadableSegmentCount);
   end;
 
