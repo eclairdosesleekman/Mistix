@@ -34,8 +34,14 @@ present/protection violation (P, bit 0), write access (W/R, bit 1), user access
 - `0x7`: present, user-mode write-protection violation;
 - `0x15`: present, user-mode instruction fetch from an NX page.
 
-The ELF loader maps executable text without `PTE_WRITABLE`, maps non-executable
-segments with `PTE_NO_EXECUTE`, and rejects writable-plus-executable segments.
+The ELF loader rejects writable-plus-executable segments. It first maps every
+new segment page as user-writable and NX, copies file bytes into that staging
+mapping, and then applies the final ELF page permissions while the new address
+space is still inactive. A small page-table helper refuses W+X final flags and
+refuses to modify the currently active CR3 root. Executable text ends as
+read-only/executable; data ends as writable/NX. This prevents the loader from
+trying to copy bytes into its own final read-only text mapping and avoids any
+transient W+X mapping.
 The user stack is writable and marked NX when NX support is available. ELF
 loading already requires NX support, so the stack-execute case is not silently
 skipped on processors without NX.
@@ -94,6 +100,9 @@ separate validation levels.
   growth, all ELF layouts, or every x86 page-fault flag.
 - A passing QEMU smoke test is not a hardware qualification or a general
   memory-safety proof.
+- ELF image pages are populated through a writable/NX staging mapping before
+  their final W^X/NX permissions are applied; this is limited to inactive
+  address spaces created during loading.
 
 ## Acceptance criteria
 
