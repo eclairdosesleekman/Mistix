@@ -23,15 +23,16 @@ linked image:
 | Symbol | Runtime error | Explicit hook status |
 | --- | --- | ---: |
 | `FPC_DIVBYZERO` | Division by zero fallback | 200 |
-| `FPC_RANGEERROR` | Range check failure | 201 |
+| `fpc_rangeerror` | Range check failure | 201 |
 | `FPC_OVERFLOW` | Integer arithmetic overflow | 215 |
 
-The selected x86-64 FPC compiler emits calls to the range and overflow hooks.
+The selected x86-64 FPC compiler emits calls to the exact ELF symbols `fpc_rangeerror` and `FPC_OVERFLOW`.
 Its signed integer division uses the native `IDIV` instruction instead of an
 undefined `FPC_DIVBYZERO` helper; a zero divisor therefore raises CPU exception
 vector 0 (`#DE`). Mistix keeps the `FPC_DIVBYZERO` entry point available as a
 compatibility fallback, while the kernel trap dispatcher isolates native
-user-mode `#DE` faults as process exits. The freestanding implementation does
+user-mode `#DE` faults as process exits. The older uppercase `FPC_RANGEERROR`
+spelling remains exported as a compatibility alias. The freestanding implementation does
 not call `FPC_HANDLEERROR`, `Halt`, `SysUtils`, or any other hosted RTL routine.
 
 ### Kernel
