@@ -507,6 +507,45 @@ begin
   Result := True;
 end;
 
+function AddressSpaceSetPageFlags(RootPhysical, VirtualAddress,
+  Flags: QWord): Boolean;
+var
+  PML4: PPageTable;
+  PDPT: PPageTable;
+  PD: PPageTable;
+  PT: PPageTable;
+  EntryValue: QWord;
+begin
+  Result := False;
+  if (RootPhysical = 0) or (VirtualAddress >= USER_ADDRESS_LIMIT) or
+     ((VirtualAddress and (PAGE_SIZE - 1)) <> 0) then Exit;
+  if (Flags and not PTE_ALLOWED_FLAGS) <> 0 then Exit;
+  if (Flags and PTE_USER) = 0 then Exit;
+  if ((Flags and PTE_NO_EXECUTE) <> 0) and not CPUHasNXSupport then Exit;
+
+  PML4 := PhysicalTablePointer(RootPhysical);
+  EntryValue := PML4^[(VirtualAddress shr 39) and $1FF];
+  if (EntryValue and PTE_PRESENT) = 0 then Exit;
+  PDPT := PhysicalTablePointer(EntryValue and PTE_ADDRESS_MASK);
+
+  EntryValue := PDPT^[(VirtualAddress shr 30) and $1FF];
+  if ((EntryValue and PTE_PRESENT) = 0) or
+     ((EntryValue and PTE_HUGE) <> 0) then Exit;
+  PD := PhysicalTablePointer(EntryValue and PTE_ADDRESS_MASK);
+
+  EntryValue := PD^[(VirtualAddress shr 21) and $1FF];
+  if ((EntryValue and PTE_PRESENT) = 0) or
+     ((EntryValue and PTE_HUGE) <> 0) then Exit;
+  PT := PhysicalTablePointer(EntryValue and PTE_ADDRESS_MASK);
+
+  EntryValue := PT^[(VirtualAddress shr 12) and $1FF];
+  if (EntryValue and PTE_PRESENT) = 0 then Exit;
+  PT^[(VirtualAddress shr 12) and $1FF] :=
+    (EntryValue and PTE_ADDRESS_MASK) or PTE_PRESENT or
+    (Flags and PTE_ALLOWED_FLAGS);
+  Result := True;
+end;
+
 function AddressSpaceLoadELF64(RootPhysical: QWord; Image: Pointer;
   ImageSize: QWord; out EntryPoint: QWord): Boolean;
 var
@@ -518,6 +557,7 @@ var
   EndPage: QWord;
   PageAddress: QWord;
   PageFlags: QWord;
+  StagingFlags: QWord;
   ImagePageCount: QWord;
   FileSource: Pointer;
   PhysicalAddress: QWord;
@@ -598,10 +638,15 @@ begin
     if CPUHasNXSupport and ((ProgramHeader^.Flags and ELF_PF_EXECUTE) = 0) then
       PageFlags := PageFlags or PTE_NO_EXECUTE;
 
+    { Populate every new image page while it is writable and NX. Final ELF
+      permissions are applied only after file bytes have been copied, so RX
+      text can be initialized without ever exposing a writable+executable PTE. }
+    StagingFlags := PTE_USER or PTE_WRITABLE or PTE_NO_EXECUTE;
     PageAddress := FirstPage;
     while PageAddress < EndPage do
     begin
-      if not AddressSpaceMapZeroPage(RootPhysical, PageAddress, PageFlags) then Exit;
+      if not AddressSpaceMapZeroPage(RootPhysical, PageAddress,
+                                     StagingFlags) then Exit;
       Inc(PageAddress, PAGE_SIZE);
     end;
 
@@ -610,6 +655,14 @@ begin
       FileSource := Pointer(PtrUInt(Image) + ProgramHeader^.FileOffset);
       if not AddressSpaceCopyTo(RootPhysical, ProgramHeader^.VirtualAddress,
                                 FileSource, ProgramHeader^.FileSize) then Exit;
+    end;
+
+    PageAddress := FirstPage;
+    while PageAddress < EndPage do
+    begin
+      if not AddressSpaceSetPageFlags(RootPhysical, PageAddress,
+                                      PageFlags) then Exit;
+      Inc(PageAddress, PAGE_SIZE);
     end;
     Inc(LoadableSegmentCount);
   end;
