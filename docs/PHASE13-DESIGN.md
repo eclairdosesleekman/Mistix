@@ -33,8 +33,8 @@ validates the handle and `whence`, computes the target position with explicit
 underflow/overflow checks, updates the server-side open slot, and returns the
 new position in response word 2. No additional lane copy-back is needed.
 
-Because the cursor belongs to the server-side open slot, duplicated local
-descriptors that reference the same remote handle share one shared file offset.
+The shared file offset belongs to the server-side open slot, so duplicated
+local descriptors that reference the same remote handle share the same cursor.
 The single-threaded `vfsd` serializes the update along with READ and WRITE.
 
 ## Local VFS behavior
