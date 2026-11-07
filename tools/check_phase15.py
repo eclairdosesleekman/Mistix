@@ -55,7 +55,7 @@ def main() -> int:
         "public name 'FPC_DIVBYZERO'",
         "public name 'FPC_RANGEERROR'",
         "public name 'FPC_OVERFLOW'",
-        "mov edi, 200", "mov edi, 201", "mov edi, 215",
+        "SysExit(200)", "SysExit(201)", "SysExit(215)",
         "mov eax, MISTIX_SYSCALL_EXIT", "int $80", "ud2",
     ))
     require("README.md", (
