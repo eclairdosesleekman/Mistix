@@ -10,7 +10,7 @@ The project explores how Pascal's explicit types, structured records, and readab
 
 ## Current implementation
 
-The latest source and design milestone in the repository is **Phase 15**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
+The latest source and design milestone in the repository is **Phase 16**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
 
 ### Kernel and execution environment
 
@@ -152,6 +152,19 @@ The handlers intentionally do not enable stack checking, I/O checking, exception
 
 See [docs/PHASE15-DESIGN.md](docs/PHASE15-DESIGN.md) for ABI details and validation scope.
 
+
+## Phase 16 — FPC runtime-check ABI verification
+
+Phase 16 makes the Phase 15 runtime handlers a tested compiler contract:
+
+- A freestanding Pascal probe contains dynamic array indexing, signed arithmetic, and integer division operations that require runtime checks.
+- `make fpc-runtime-check` compiles that probe with the same x86-64, no-link, no-optimization, range-check, and overflow-check options as the Debug profile.
+- The validation inspects the generated object with `nm` and requires undefined references to `FPC_RANGEERROR`, `FPC_OVERFLOW`, and `FPC_DIVBYZERO`. This verifies the compiler actually emits the hooks that Mistix implements.
+- The compile-only probe is kept separate from the freestanding kernel and userland images; it does not run privileged instructions or modify the guest.
+- `make phase16-check` verifies the test wiring and preserves the Phase 14 historical source-check contract.
+
+Run `make fpc-runtime-check` on a host with FPC and GNU `nm` installed. CI runs it before the full Release/Debug builds and QEMU smoke tests.
+
 ## Networking
 
 The current network implementation is a protocol/parser and software-loopback experiment:
@@ -219,6 +232,8 @@ make phase12-check
 make phase13-check
 make phase14-check
 make phase15-check
+make phase16-check
+make fpc-runtime-check
 make test
 ```
 
@@ -266,6 +281,7 @@ The design notes are the best place to find the detailed invariants and limitati
 - [Phase 13 — File seeking](docs/PHASE13-DESIGN.md)
 - [Phase 14 — Build, test, and boot validation](docs/PHASE14-DESIGN.md)
 - [Phase 15 — Freestanding runtime diagnostics](docs/PHASE15-DESIGN.md)
+- [Phase 16 — FPC runtime-check ABI verification](docs/PHASE16-DESIGN.md)
 
 Some legacy serial-output text still uses a Phase 9 label; the source and design notes describe later Phase 11–14 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
 

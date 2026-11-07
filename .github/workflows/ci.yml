@@ -74,6 +74,9 @@ jobs:
       - name: Run source-contract and host-tool tests
         run: make test
 
+      - name: Verify checked FPC runtime ABI
+        run: make fpc-runtime-check
+
       - name: Build release profile
         run: make release
 
