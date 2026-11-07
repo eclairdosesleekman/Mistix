@@ -170,7 +170,7 @@ Run `make fpc-runtime-check` on a host with FPC and GNU `nm` installed. CI runs 
 Phase 17 closes the userland runtime-hook gap and exercises the process-exit path end to end:
 
 - The shared userland library now defines `FPC_DIVBYZERO`, `FPC_RANGEERROR`, and `FPC_OVERFLOW`; each hook exits only the faulting process with the compiler's runtime error code.
-- A freestanding `/bin/runtimefault` test image can trigger range, overflow, and divide-by-zero checks from runtime-supplied values.
+- A freestanding `/bin/runtimefault` test image can trigger range, native-width (`Int64`) overflow, and divide-by-zero checks from runtime-supplied values.
 - Debug init launches each case as a child, waits for it, and checks the returned status (201, 215, and the vector-0 exception tag `0x8000000000000000`). The test fails boot smoke if the child does not exit with its expected code or cannot be reaped.
 - Release does not run deliberate fault cases. The new Debug smoke assertion requires the Phase 17 success marker.
 
