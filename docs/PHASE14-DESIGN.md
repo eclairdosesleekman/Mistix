@@ -6,7 +6,7 @@ Phase 14 establishes a repeatable host-side validation path before the project
 adds more kernel features. It does not change the kernel ABI or claim that the
 current kernel is production-ready.
 
-## Build profiles
+## Debug and release profiles
 
 The Makefile accepts `BUILD_TYPE=release` or `BUILD_TYPE=debug`. Their
 outputs are isolated under `build/release/` and `build/debug/`, so changing
@@ -40,6 +40,8 @@ linked with `--nostdlib`, and undefined-symbol checks remain enabled.
 - `make smoke` builds a hybrid Limine ISO, starts QEMU headlessly, and checks
   serial output for both the kernel's initialized marker and the init process
   reaching the shell launch path.
+
+### MFS1 image-builder tests
 
 The MFS1 image builder is covered by integration tests for the exact binary
 layout, empty payloads, duplicate paths, and unsafe/non-canonical paths.
