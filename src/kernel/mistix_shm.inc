@@ -77,7 +77,7 @@ var
   Generation: Word;
   Handle: LongWord;
   Status: TKernelResult;
-  Words: PQWord;
+  Words: PPageTable;
 begin
   Result := QWord(-22);
   if (ProcessIndex >= PROCESS_MAX_COUNT) or
@@ -110,7 +110,7 @@ begin
       Exit;
     end;
     Words := PQWord(PtrUInt(MemoryHHDMOffset + Physical[I]));
-    for J := 0 to 511 do Words[J] := 0;
+    for J := 0 to 511 do Words^[J] := 0;
   end;
 
   Generation := P7SharedObjects[ObjectIndex].Generation + 1;
