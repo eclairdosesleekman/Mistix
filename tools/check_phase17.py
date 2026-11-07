@@ -65,6 +65,10 @@ def main() -> int:
         "VFS_RPC_READDIR = $4D5653460000000A",
         "call MistixInitMain",
     ))
+    require("userland/sh/mistixsh.pas", (
+        "HelpText: array[0..62] of Char = 'Builtins: help, cd PATH, pwd, exit. Commands: ls, cat, echo.'",
+        "call MistixShellMain",
+    ))
     for source, entry in (
         ("userland/sh/mistixsh.pas", "MistixShellMain"),
         ("userland/bin/mistixls.pas", "MistixLSMain"),
