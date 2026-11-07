@@ -51,7 +51,8 @@ def main() -> int:
         "SysSpawnPath", "SysWaitPID",
         "RuntimeRangeArgs, RuntimeRangeName, 201",
         "RuntimeOverflowArgs, RuntimeOverflowName, 215",
-        "RuntimeDivideArgs, RuntimeDivideName, QWord($8000000000000000)",
+        "RuntimeDivideArgs, RuntimeDivideName,",
+        "QWord($8000000000000000)",
         "MISTIX_DEBUG_CHECKS",
         "[ OK ] Phase 17 runtime fault isolation tests passed.",
     ))
