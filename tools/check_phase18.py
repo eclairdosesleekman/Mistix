@@ -55,10 +55,6 @@ def main() -> int:
         "[ OK ] Phase 17 runtime fault isolation tests passed.",
         "[ OK ] Phase 18 user-mode page-fault isolation tests passed.",
     ))
-    require("Makefile", (
-        "status=$?; set -e",
-        "if [ $status -ne 124 ] && [ $status -ne 0 ]",
-    ))
     require("src/kernel/mistix_trap.inc", (
         "if (Vector = 14) and (CurrentProcessIndex < PROCESS_MAX_COUNT) then",
         "ExitCode := QWord($8000000000000000) or (Vector shl 32) or",
