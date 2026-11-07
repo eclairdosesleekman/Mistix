@@ -58,9 +58,10 @@ Mistix's freestanding definitions before spending time on full image builds.
   for all unresolved compiler/runtime symbols.
 - QEMU smoke verifies the existing normal boot path, not deliberate range,
   overflow, or divide-by-zero fault injection.
-- A future guest-side fault-injection phase should verify the kernel halt
-  diagnostics and that a failing user process can be reaped with the expected
-  status code.
+- The object-symbol check does not execute those handlers. At the Phase 16
+  baseline, guest-side fault injection was still outstanding; Phase 17 adds
+  userland range, overflow, and divide-by-zero process-isolation tests. See
+  [docs/PHASE17-DESIGN.md](PHASE17-DESIGN.md).
 
 ## Acceptance criteria
 
