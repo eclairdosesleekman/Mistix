@@ -38,11 +38,11 @@ def main() -> int:
     ))
     require("tools/check_fpc_runtime.py", (
         "-Tlinux", "-Px86_64", "-Cn", "-O-", "-Cr", "-Co",
-        "FPC_RANGEERROR", "FPC_OVERFLOW", "FPC_DIVBYZERO",
-        "nm_command + [", "TemporaryDirectory",
+        "fpc_rangeerror", "FPC_OVERFLOW", "OBJDUMP",
+        "objdump_command + [", "SIGNED_DIVISION", "TemporaryDirectory",
     ))
     require("docs/PHASE16-DESIGN.md", (
-        "FPC_RANGEERROR", "FPC_OVERFLOW", "FPC_DIVBYZERO",
+        "fpc_rangeerror", "FPC_OVERFLOW", "IDIV", "#DE",
         "make fpc-runtime-check", "compile-time ABI test",
         "does not execute those handlers",
     ))
@@ -56,9 +56,9 @@ def main() -> int:
         "docs/PHASE16-DESIGN.md",
     ))
     print("[ OK ] Phase 14 historical checker contract remains valid.")
-    print("[ OK ] FPC probe covers range, overflow, and divide-by-zero operations.")
-    print("[ OK ] Compiler object-symbol validation is wired into CI.")
-    print("[NOTE] Object-symbol checks do not execute guest runtime error handlers.")
+    print("[ OK ] FPC probe covers range, overflow, and native signed division.")
+    print("[ OK ] Compiler symbols and IDIV codegen are validated by CI.")
+    print("[NOTE] Compile/disassembly checks do not execute guest fault handlers.")
     return 0
 
 if __name__ == "__main__":

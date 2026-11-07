@@ -6,7 +6,7 @@ const
   MEMORY_OBJECT_MAX_COUNT = 8;
   MEMORY_OBJECT_MAX_PAGES = 16;
   MEMORY_OBJECT_MAX_MAPPINGS = 32;
-  MEMORY_OBJECT_TEST_BASE = $FFFFC10000000000;
+  MEMORY_OBJECT_TEST_BASE = QWord($FFFFC10000000000);
 
 type
   TMemoryObjectMapping = record
@@ -70,10 +70,10 @@ end;
 
 procedure ZeroPhysicalPageForObject(PhysicalAddress: QWord);
 var
-  Words: PQWord;
+  Words: PPageTable;
   I: LongWord;
 begin
-  Words := PQWord(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
+  Words := PPageTable(PtrUInt(MemoryHHDMOffset + PhysicalAddress));
   for I := 0 to 511 do
     Words^[I] := 0;
 end;

@@ -109,7 +109,7 @@ const
   PMM_BITMAP_BYTES = PMM_PAGE_COUNT div 8;
   PMM_MAX_MEMMAP_ENTRIES = 4096;
 
-  VMM_TEST_VIRTUAL_ADDRESS = $FFFFC00000000000;
+  VMM_TEST_VIRTUAL_ADDRESS = QWord($FFFFC00000000000);
   THREAD_MAX_COUNT = 12;
   THREAD_STACK_SIZE = 16384;
 
@@ -118,6 +118,8 @@ const
     '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
   );
 
+{$push}
+{$R-}
 var
   LimineRequests: TLimineRequestBlock = (
     StartMarker: (
@@ -180,3 +182,4 @@ var
       $9572709F31764C62
     )
   ); public name 'limine_request_block';
+{$pop}

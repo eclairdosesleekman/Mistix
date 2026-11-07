@@ -35,13 +35,13 @@ const
   MISTIX_SYSCALL_LSEEK = 32;
 
   MISTIX_SYSCALL_MAX_WRITE = 4096;
-  MISTIX_ERR_BADF = $FFFFFFFFFFFFFFF7;
-  MISTIX_ERR_FAULT = $FFFFFFFFFFFFFFF2;
-  MISTIX_ERR_INVAL = $FFFFFFFFFFFFFFEA;
-  MISTIX_ERR_NOSYS = $FFFFFFFFFFFFFFDA;
-  MISTIX_ERR_NOMEM = $FFFFFFFFFFFFFFF4;
-  MISTIX_ERR_BUSY = $FFFFFFFFFFFFFFF0;
-  MISTIX_ERR_AGAIN = $FFFFFFFFFFFFFFF5;
+  MISTIX_ERR_BADF = not QWord(8);
+  MISTIX_ERR_FAULT = not QWord(13);
+  MISTIX_ERR_INVAL = not QWord(21);
+  MISTIX_ERR_NOSYS = not QWord(37);
+  MISTIX_ERR_NOMEM = not QWord(11);
+  MISTIX_ERR_BUSY = not QWord(15);
+  MISTIX_ERR_AGAIN = not QWord(10);
   VFS_BROKER_SHARED_BASE = QWord($0000500000000000);
   VFS_BROKER_SHARED_SIZE = 65536;
   VFS_BROKER_OPEN = $4D56534600000011;
@@ -57,7 +57,7 @@ const
   VFS_BROKER_SLOT_SIZE = 8192;
   VFS_BROKER_TIMEOUT_TICKS = 500;
   VFS_BROKER_CANCEL_GRACE_TICKS = 1000;
-  VFS_BROKER_ERR_TIMEOUT = QWord(-110);
+  VFS_BROKER_ERR_TIMEOUT = not QWord(109);
   VFS_BROKER_OP_OPEN = 1;
   VFS_BROKER_OP_READ = 2;
   VFS_BROKER_OP_WRITE = 3;
@@ -119,7 +119,7 @@ var
 
 function SyscallBlockRegisterCurrent: QWord;
 begin
-  Result := QWord(-1); { -EPERM }
+  Result := QWord($FFFFFFFFFFFFFFFF); { -EPERM }
   if CurrentProcessIndex >= PROCESS_MAX_COUNT then Exit;
   if ProcessTable[CurrentProcessIndex].State <> psRunning then Exit;
   { PID 1 is the init authority in this bring-up ABI. Only its direct child
@@ -136,15 +136,15 @@ function SyscallBlockInfo(Process: PKernelProcess; UserInfoAddress: QWord): QWor
 var
   Info: TMistixBlockUserInfo;
 begin
-  Result := QWord(-1); { -EPERM }
+  Result := QWord($FFFFFFFFFFFFFFFF); { -EPERM }
   if (Process = nil) or (Process^.PID = 0) or
      (Process^.PID <> BlockServerPID) then Exit;
-  Result := QWord(-19); { -ENODEV }
+  Result := QWord($FFFFFFFFFFFFFFED); { -ENODEV }
   if not BlockInitialized or (BlockDevices[0].Active = 0) then Exit;
   Info.SectorCount := BlockDevices[0].SectorCount;
   Info.SectorSize := BLOCK_SECTOR_SIZE;
   Info.Flags := 1; { physical ATA PIO device }
-  Result := QWord(-14); { -EFAULT }
+  Result := QWord($FFFFFFFFFFFFFFF2); { -EFAULT }
   if not AddressSpaceCopyTo(Process^.AddressSpaceRoot, UserInfoAddress,
        @Info, SizeOf(Info)) then Exit;
   Result := 0;
@@ -155,30 +155,30 @@ function SyscallBlockRead(Process: PKernelProcess; LBA, SectorCount,
 var
   ByteCount: QWord;
 begin
-  Result := QWord(-1); { -EPERM }
+  Result := QWord($FFFFFFFFFFFFFFFF); { -EPERM }
   if (Process = nil) or (Process^.PID = 0) or
      (Process^.PID <> BlockServerPID) then Exit;
-  Result := QWord(-19); { -ENODEV }
+  Result := QWord($FFFFFFFFFFFFFFED); { -ENODEV }
   if not BlockInitialized or (BlockDevices[0].Active = 0) then Exit;
-  Result := QWord(-22); { -EINVAL }
+  Result := QWord($FFFFFFFFFFFFFFEA); { -EINVAL }
   if (SectorCount = 0) or (SectorCount > 128) then Exit;
   if (LBA > BlockDevices[0].SectorCount) or
      (SectorCount > BlockDevices[0].SectorCount - LBA) then
   begin
-    Result := QWord(-34); { -ERANGE }
+    Result := QWord($FFFFFFFFFFFFFFDE); { -ERANGE }
     Exit;
   end;
   ByteCount := SectorCount * BLOCK_SECTOR_SIZE;
-  Result := QWord(-14); { -EFAULT }
+  Result := QWord($FFFFFFFFFFFFFFF2); { -EFAULT }
   if not AddressSpaceValidateUserRange(Process^.AddressSpaceRoot,
        UserBuffer, ByteCount) then Exit;
-  Result := QWord(-5); { -EIO }
+  Result := QWord($FFFFFFFFFFFFFFFB); { -EIO }
   if not BlockReadSectors(0, LBA, LongWord(SectorCount),
        @BlockSyscallScratch[0]) then Exit;
   if not AddressSpaceCopyTo(Process^.AddressSpaceRoot, UserBuffer,
        @BlockSyscallScratch[0], ByteCount) then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     Exit;
   end;
   Result := ByteCount;
@@ -188,12 +188,11 @@ procedure SyscallISR; assembler; nostackframe; public name 'mistix_syscall_isr';
 asm
   push 0
   push 128
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure VFSBrokerInitialize; forward;
 procedure VFSBrokerPumpReplies; forward;
-procedure VFSBrokerFlushRemoteCloses; forward;
 function VFSBrokerHasActiveRequests: Boolean; forward;
 
 procedure SyscallInitialize;
@@ -237,7 +236,7 @@ begin
     VFSBrokerPending[I].UserBuffer := 0;
     VFSBrokerPending[I].ByteCount := 0;
     VFSBrokerPending[I].Flags := 0;
-    VFSBrokerPending[I].ResultValue := QWord(-11);
+    VFSBrokerPending[I].ResultValue := QWord($FFFFFFFFFFFFFFF5);
     VFSBrokerPending[I].Payload := 0;
     for J := 0 to VFS_PATH_MAX do
       VFSBrokerPending[I].RequestPath[J] := #0;
@@ -253,26 +252,26 @@ var
   ReplyObject, ReplyGeneration: Word;
   Offset, InitPhysical, ServerPhysical, InitFlags, ServerFlags: QWord;
 begin
-  Result := QWord(-1); { -EPERM: only init registers the global VFS broker. }
+  Result := QWord($FFFFFFFFFFFFFFFF); { -EPERM: only init registers the global VFS broker. }
   if CurrentProcessIndex >= PROCESS_MAX_COUNT then Exit;
   if ProcessTable[CurrentProcessIndex].PID <> 1 then Exit;
-  Result := QWord(-22);
+  Result := QWord($FFFFFFFFFFFFFFEA);
   if (RequestHandle > High(LongWord)) or (ReplyHandle > High(LongWord)) or
      (RequestHandle = ReplyHandle) then Exit;
-  Result := QWord(-3); { -ESRCH }
+  Result := QWord($FFFFFFFFFFFFFFFD); { -ESRCH }
   if not ProcessFindByPID(ServerPID, ServerIndex) then Exit;
   if (ServerIndex = CurrentProcessIndex) or
      (ProcessTable[ServerIndex].ParentPID <> 1) or
      (ProcessTable[ServerIndex].State = psZombie) or
      (ProcessTable[ServerIndex].State = psFree) then Exit;
-  Result := QWord(-9);
+  Result := QWord($FFFFFFFFFFFFFFF7);
   if ProcessCapabilityLookup(ProcessTable[CurrentProcessIndex].Capabilities,
        LongWord(RequestHandle), CAP_RIGHT_SEND, okEndpoint,
        RequestObject, RequestGeneration) <> krSuccess then Exit;
   if ProcessCapabilityLookup(ProcessTable[CurrentProcessIndex].Capabilities,
        LongWord(ReplyHandle), CAP_RIGHT_RECEIVE, okEndpoint,
        ReplyObject, ReplyGeneration) <> krSuccess then Exit;
-  Result := QWord(-22);
+  Result := QWord($FFFFFFFFFFFFFFEA);
   if (RequestObject = ReplyObject) or
      (RequestObject >= ENDPOINT_MAX_COUNT) or
      (ReplyObject >= ENDPOINT_MAX_COUNT) then Exit;
@@ -280,7 +279,7 @@ begin
      (EndpointTable[RequestObject].Generation <> RequestGeneration) or
      (EndpointTable[ReplyObject].Active = 0) or
      (EndpointTable[ReplyObject].Generation <> ReplyGeneration) then Exit;
-  Result := QWord(-14);
+  Result := QWord($FFFFFFFFFFFFFFF2);
   if not AddressSpaceValidateUserRange(ProcessTable[CurrentProcessIndex].AddressSpaceRoot,
        VFS_BROKER_SHARED_BASE, VFS_BROKER_SHARED_SIZE) or
      not AddressSpaceValidateUserRange(ProcessTable[ServerIndex].AddressSpaceRoot,
@@ -309,13 +308,13 @@ begin
        (VFSBrokerReplyEndpointGeneration = ReplyGeneration) then
       Result := 0
     else
-      Result := QWord(-16);
+      Result := QWord($FFFFFFFFFFFFFFF0);
     Exit;
   end;
   VFSBrokerPumpReplies;
   if VFSBrokerHasActiveRequests then
   begin
-    Result := QWord(-16);
+    Result := QWord($FFFFFFFFFFFFFFF0);
     Exit;
   end;
   VFSBrokerServerPID := ServerPID;
@@ -471,7 +470,7 @@ begin
         else
         begin
           VFSBrokerPending[I].Ready := 1;
-          VFSBrokerPending[I].ResultValue := QWord(-5);
+          VFSBrokerPending[I].ResultValue := QWord($FFFFFFFFFFFFFFFB);
           VFSBrokerPending[I].Payload := 0;
         end;
       end;
@@ -491,7 +490,7 @@ begin
         if VFSBrokerPending[I].Active <> 0 then
         begin
           VFSBrokerPending[I].Ready := 1;
-          VFSBrokerPending[I].ResultValue := QWord(-5);
+          VFSBrokerPending[I].ResultValue := QWord($FFFFFFFFFFFFFFFB);
           VFSBrokerPending[I].Payload := 0;
         end;
       Exit;
@@ -506,7 +505,7 @@ begin
         if VFSBrokerPending[I].Active <> 0 then
         begin
           VFSBrokerPending[I].Ready := 1;
-          VFSBrokerPending[I].ResultValue := QWord(-5);
+          VFSBrokerPending[I].ResultValue := QWord($FFFFFFFFFFFFFFFB);
           VFSBrokerPending[I].Payload := 0;
         end;
       Exit;
@@ -575,7 +574,7 @@ begin
          (Message.Words[1] <> VFSBrokerPending[MatchIndex].OwnerPID) or
          (Message.Words[3] <> VFSBrokerPending[MatchIndex].ServerGeneration) then
       begin
-        VFSBrokerPending[MatchIndex].ResultValue := QWord(-71);
+        VFSBrokerPending[MatchIndex].ResultValue := QWord($FFFFFFFFFFFFFFB9);
         VFSBrokerPending[MatchIndex].Payload := 0;
         VFSBrokerPending[MatchIndex].Ready := 1;
         Continue;
@@ -653,7 +652,7 @@ var
   NameTerminated, ValidEntries, PathOperation: Boolean;
   LocalPath: array[0..VFS_PATH_MAX] of Byte;
 begin
-  Result := QWord(-19); { -ENODEV }
+  Result := QWord($FFFFFFFFFFFFFFED); { -ENODEV }
   PathOperation := (Operation = VFS_BROKER_OP_OPEN) or
     (Operation = VFS_BROKER_OP_DIR_OPEN) or
     (Operation = VFS_BROKER_OP_CHDIR);
@@ -672,18 +671,18 @@ begin
   end;
   if Operation = VFS_BROKER_OP_SEEK then
   begin
-    Result := QWord(-22);
+    Result := QWord($FFFFFFFFFFFFFFEA);
     if (RemoteHandle = 0) or (ByteCount > 2) then Exit;
   end;
 
   if ProcessIndex >= PROCESS_MAX_COUNT then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     Exit;
   end;
   if ProcessTable[ProcessIndex].State <> psRunning then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     Exit;
   end;
 
@@ -711,17 +710,17 @@ begin
        (VFSBrokerPending[SlotIndex].ByteCount <> ByteCount) or
        (VFSBrokerPending[SlotIndex].Flags <> Flags) then
     begin
-      Result := QWord(-16); { -EBUSY: request changed while transaction pending. }
+      Result := QWord($FFFFFFFFFFFFFFF0); { -EBUSY: request changed while transaction pending. }
       Exit;
     end;
     if PathOperation then
       for I := 0 to VFS_PATH_MAX do
         if VFSBrokerPending[SlotIndex].RequestPath[I] <> Path[I] then
         begin
-          Result := QWord(-16);
+          Result := QWord($FFFFFFFFFFFFFFF0);
           Exit;
         end;
-    Result := QWord(-11);
+    Result := QWord($FFFFFFFFFFFFFFF5);
     if VFSBrokerPending[SlotIndex].Ready = 0 then Exit;
 
     Status := VFSBrokerPending[SlotIndex].ResultValue;
@@ -746,7 +745,7 @@ begin
           if FD < 0 then
           begin
             VFSQueueRemoteClose(Payload);
-            Result := QWord(-24);
+            Result := QWord($FFFFFFFFFFFFFFE8);
           end
           else
             Result := QWord(FD);
@@ -758,14 +757,14 @@ begin
           if FD < 0 then
           begin
             VFSQueueRemoteClose(Payload);
-            Result := QWord(-24);
+            Result := QWord($FFFFFFFFFFFFFFE8);
           end
           else
             Result := QWord(FD);
         end;
       VFS_BROKER_OP_DIR_READ:
         begin
-          Result := QWord(-71); { -EPROTO }
+          Result := QWord($FFFFFFFFFFFFFFB9); { -EPROTO }
           if (Payload <= VFSBrokerPending[SlotIndex].ByteCount) and
              (Payload <= VFS_BROKER_DIRENT_MAX) then
           begin
@@ -774,13 +773,13 @@ begin
             begin
               TransferBytes := Payload * SizeOf(TVFSDirent);
               if TransferBytes > VFS_IO_MAX then
-                Result := QWord(-71)
+                Result := QWord($FFFFFFFFFFFFFFB9)
               else
               begin
                 ServerRoot := ProcessTable[VFSBrokerServerIndex].AddressSpaceRoot;
                 if not AddressSpaceCopyFrom(ServerRoot, LaneAddress,
                      @VFSBrokerScratch[0], TransferBytes) then
-                  Result := QWord(-14)
+                  Result := QWord($FFFFFFFFFFFFFFF2)
                 else
                 begin
                   ValidEntries := True;
@@ -815,12 +814,12 @@ begin
                     if not NameTerminated then ValidEntries := False;
                   end;
                   if not ValidEntries then
-                    Result := QWord(-71)
+                    Result := QWord($FFFFFFFFFFFFFFB9)
                   else if not AddressSpaceCopyTo(
                     ProcessTable[ProcessIndex].AddressSpaceRoot,
                     VFSBrokerPending[SlotIndex].UserBuffer,
                     @VFSBrokerScratch[0], TransferBytes) then
-                    Result := QWord(-14);
+                    Result := QWord($FFFFFFFFFFFFFFF2);
                 end;
               end;
             end;
@@ -846,12 +845,12 @@ begin
                not AddressSpaceCopyTo(ProcessTable[ProcessIndex].AddressSpaceRoot,
                  VFSBrokerPending[SlotIndex].UserBuffer,
                  @VFSBrokerScratch[0], Result) then
-              Result := QWord(-14);
+              Result := QWord($FFFFFFFFFFFFFFF2);
           end;
         end;
       VFS_BROKER_OP_WRITE:
         if Payload > VFSBrokerPending[SlotIndex].ByteCount then
-          Result := QWord(-71)
+          Result := QWord($FFFFFFFFFFFFFFB9)
         else
           Result := Payload;
       VFS_BROKER_OP_SEEK:
@@ -859,25 +858,25 @@ begin
       VFS_BROKER_OP_CLOSE:
         Result := 0;
     else
-      Result := QWord(-22);
+      Result := QWord($FFFFFFFFFFFFFFEA);
     end;
     VFSBrokerClearPending(SlotIndex);
     Exit;
   end;
 
-  Result := QWord(-19);
+  Result := QWord($FFFFFFFFFFFFFFED);
   if not VFSBrokerRegistered or not VFSBrokerServerAlive then Exit;
 
   if (Operation = VFS_BROKER_OP_READ) or
      (Operation = VFS_BROKER_OP_WRITE) then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     if (ByteCount <> 0) and not AddressSpaceValidateUserRange(
          ProcessTable[ProcessIndex].AddressSpaceRoot, UserBuffer, ByteCount) then Exit;
   end
   else if Operation = VFS_BROKER_OP_DIR_READ then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     TransferBytes := ByteCount * SizeOf(TVFSDirent);
     if (TransferBytes = 0) or (TransferBytes > VFS_IO_MAX) or
        not AddressSpaceValidateUserRange(
@@ -887,7 +886,7 @@ begin
   else if PathOperation then
   begin
     PathLength := VFSStringLength(Path);
-    Result := QWord(-36); { -ENAMETOOLONG }
+    Result := QWord($FFFFFFFFFFFFFFDC); { -ENAMETOOLONG }
     if (PathLength = 0) or (PathLength > VFS_PATH_MAX) then Exit;
     for I := 0 to High(LocalPath) do LocalPath[I] := 0;
     for I := 0 to PathLength - 1 do LocalPath[I] := Ord(Path[I]);
@@ -895,7 +894,7 @@ begin
   else if (Operation <> VFS_BROKER_OP_CLOSE) and
           (Operation <> VFS_BROKER_OP_SEEK) then
   begin
-    Result := QWord(-22);
+    Result := QWord($FFFFFFFFFFFFFFEA);
     Exit;
   end;
 
@@ -906,7 +905,7 @@ begin
       PendingIndex := LongInt(I);
       Break;
     end;
-  Result := QWord(-11); { -EAGAIN: all bounded request slots are occupied. }
+  Result := QWord($FFFFFFFFFFFFFFF5); { -EAGAIN: all bounded request slots are occupied. }
   if PendingIndex < 0 then Exit;
   SlotIndex := LongWord(PendingIndex);
   LaneAddress := VFS_BROKER_SHARED_BASE +
@@ -920,7 +919,7 @@ begin
      not AddressSpaceCopyTo(ServerRoot, LaneAddress + VFS_IO_MAX,
        @VFSBrokerScratch[0], VFS_IO_MAX) then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     Exit;
   end;
   if Operation = VFS_BROKER_OP_WRITE then
@@ -929,13 +928,13 @@ begin
          ProcessTable[ProcessIndex].AddressSpaceRoot, UserBuffer,
          @VFSBrokerScratch[0], ByteCount) then
     begin
-      Result := QWord(-14);
+      Result := QWord($FFFFFFFFFFFFFFF2);
       Exit;
     end;
     if (ByteCount <> 0) and not AddressSpaceCopyTo(
          ServerRoot, LaneAddress, @VFSBrokerScratch[0], ByteCount) then
     begin
-      Result := QWord(-14);
+      Result := QWord($FFFFFFFFFFFFFFF2);
       Exit;
     end;
   end
@@ -944,7 +943,7 @@ begin
     if not AddressSpaceCopyTo(ServerRoot, LaneAddress,
          @LocalPath[0], SizeOf(LocalPath)) then
     begin
-      Result := QWord(-14);
+      Result := QWord($FFFFFFFFFFFFFFF2);
       Exit;
     end;
   end
@@ -955,7 +954,7 @@ begin
     if not AddressSpaceCopyTo(ServerRoot, LaneAddress,
          @VFSBrokerScratch[0], 8) then
     begin
-      Result := QWord(-14);
+      Result := QWord($FFFFFFFFFFFFFFF2);
       Exit;
     end;
   end;
@@ -991,7 +990,7 @@ begin
   Message.Words[5] := VFSBrokerServerGeneration;
   if not VFSBrokerQueueRequest(Message) then
   begin
-    Result := QWord(-11);
+    Result := QWord($FFFFFFFFFFFFFFF5);
     Exit;
   end;
 
@@ -1012,7 +1011,7 @@ begin
   VFSBrokerPending[SlotIndex].UserBuffer := UserBuffer;
   VFSBrokerPending[SlotIndex].ByteCount := ByteCount;
   VFSBrokerPending[SlotIndex].Flags := Flags;
-  VFSBrokerPending[SlotIndex].ResultValue := QWord(-11);
+  VFSBrokerPending[SlotIndex].ResultValue := QWord($FFFFFFFFFFFFFFF5);
   VFSBrokerPending[SlotIndex].Payload := 0;
   for I := 0 to VFS_PATH_MAX do
     if PathOperation and (I <= LongWord(High(Path))) then
@@ -1020,7 +1019,7 @@ begin
     else
       VFSBrokerPending[SlotIndex].RequestPath[I] := #0;
   Inc(VFSBrokerNextTransaction);
-  Result := QWord(-11);
+  Result := QWord($FFFFFFFFFFFFFFF5);
 end;
 
 function VFSBrokerIsExt2Path(const Path: array of Char): Boolean;
@@ -1049,13 +1048,13 @@ begin
       if not VFSCopyUserString(Process^.AddressSpaceRoot, PathAddress,
            UserPath) then
       begin
-        Result := QWord(-14);
+        Result := QWord($FFFFFFFFFFFFFFF2);
         Exit;
       end;
       if not VFSNormalizePath(Process^.Files.CurrentDirectory, UserPath,
            CanonicalPath) then
       begin
-        Result := QWord(-36);
+        Result := QWord($FFFFFFFFFFFFFFDC);
         Exit;
       end;
       if VFSBrokerIsExt2Path(CanonicalPath) then
@@ -1077,13 +1076,13 @@ begin
   end;
   if not VFSCopyUserString(Process^.AddressSpaceRoot, PathAddress, UserPath) then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     Exit;
   end;
   if not VFSNormalizePath(Process^.Files.CurrentDirectory, UserPath,
        CanonicalPath) then
   begin
-    Result := QWord(-36);
+    Result := QWord($FFFFFFFFFFFFFFDC);
     Exit;
   end;
   IsDevice := (CanonicalPath[0] = '/') and
@@ -1098,7 +1097,7 @@ begin
   PathLength := VFSStringLength(CanonicalPath);
   if PathLength = 0 then
   begin
-    Result := QWord(-2);
+    Result := QWord($FFFFFFFFFFFFFFFE);
     Exit;
   end;
   Result := VFSBrokerCall(CurrentProcessIndex, VFS_BROKER_OP_OPEN,
@@ -1118,7 +1117,7 @@ begin
   begin
     if (RemoteFlags and 3) = VFS_O_WRONLY then
     begin
-      Result := QWord(-9);
+      Result := QWord($FFFFFFFFFFFFFFF7);
       Exit;
     end;
     EmptyPath[0] := #0;
@@ -1143,7 +1142,7 @@ begin
   begin
     if (RemoteFlags and 3) = VFS_O_RDONLY then
     begin
-      Result := QWord(-9);
+      Result := QWord($FFFFFFFFFFFFFFF7);
       Exit;
     end;
     EmptyPath[0] := #0;
@@ -1184,13 +1183,13 @@ begin
   end;
   if not VFSCopyUserString(Process^.AddressSpaceRoot, PathAddress, UserPath) then
   begin
-    Result := QWord(-14);
+    Result := QWord($FFFFFFFFFFFFFFF2);
     Exit;
   end;
   if not VFSNormalizePath(Process^.Files.CurrentDirectory, UserPath,
        CanonicalPath) then
   begin
-    Result := QWord(-36);
+    Result := QWord($FFFFFFFFFFFFFFDC);
     Exit;
   end;
   if VFSBrokerIsExt2Path(CanonicalPath) then
@@ -1213,7 +1212,7 @@ var
 begin
   if Whence > 2 then
   begin
-    Result := QWord(-22);
+    Result := QWord($FFFFFFFFFFFFFFEA);
     Exit;
   end;
   if VFSIsRemoteFD(Process^.Files, FileDescriptor, RemoteHandle,

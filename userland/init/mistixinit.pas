@@ -23,6 +23,13 @@ const
   NetdPath: array[0..10] of Char = ('/','s','b','i','n','/','n','e','t','d',#0);
   Ext2RootPath: array[0..9] of Char = ('/','m','n','t','/','d','i','s','k',#0);
   EmptyArgs: array[0..0] of Char = (#0);
+  RuntimeFaultPath: array[0..17] of Char = '/bin/runtimefault'#0;
+  RuntimeRangeArgs: array[0..5] of Char = 'range'#0;
+  RuntimeOverflowArgs: array[0..8] of Char = 'overflow'#0;
+  RuntimeDivideArgs: array[0..6] of Char = 'divide'#0;
+  RuntimeRangeName: array[0..5] of Char = 'range'#0;
+  RuntimeOverflowName: array[0..8] of Char = 'overflow'#0;
+  RuntimeDivideName: array[0..6] of Char = 'divide'#0;
 
   VFS_RPC_PING  = $4D56534600000001;
   VFS_RPC_OPEN  = $4D56534600000002;
@@ -32,6 +39,7 @@ const
   VFS_RPC_WRITE = $4D56534600000007;
   VFS_RPC_UNLINK = $4D56534600000008;
   VFS_RPC_MOUNT_EXT2 = $4D56534600000009;
+  VFS_RPC_READDIR = $4D5653460000000A;
   BLOCK_RPC_INFO  = $4D424C4B00000001;
   BLOCK_RPC_READ  = $4D424C4B00000002;
   BLOCK_RPC_WRITE = $4D424C4B00000003;
@@ -469,6 +477,63 @@ begin
   Result := True;
 end;
 
+
+{$ifdef MISTIX_DEBUG_CHECKS}
+function RunRuntimeFaultCase(const Args, CaseName: array of Char;
+  ExpectedStatus: QWord): Boolean;
+var
+  PID, WaitedPID, Status: QWord;
+begin
+  Result := False;
+  PID := SysSpawnPath(PtrUInt(@RuntimeFaultPath[0]),
+    PtrUInt(@Args[0]), 0, 1);
+  if IsError(PID) then
+  begin
+    WriteCString('[FAIL] Could not spawn Phase 17 runtime-fault child: ');
+    WriteCString(CaseName);
+    WriteCString(#13#10);
+    Exit;
+  end;
+
+  Status := High(QWord);
+  WaitedPID := SysWaitPID(PID, PtrUInt(@Status));
+  if WaitedPID <> PID then
+  begin
+    WriteCString('[FAIL] waitpid did not reap Phase 17 child: ');
+    WriteCString(CaseName);
+    WriteCString(#13#10);
+    Exit;
+  end;
+  if Status <> ExpectedStatus then
+  begin
+    WriteCString('[FAIL] Phase 17 runtime-fault status mismatch for ');
+    WriteCString(CaseName);
+    WriteCString(': expected ');
+    WriteNumber(ExpectedStatus);
+    WriteCString(', got ');
+    WriteNumber(Status);
+    WriteCString(#13#10);
+    Exit;
+  end;
+
+  WriteCString('[ OK ] Phase 17 isolated runtime fault: ');
+  WriteCString(CaseName);
+  WriteCString(' returned the expected exit status.'#13#10);
+  Result := True;
+end;
+
+function TestRuntimeFaultIsolation: Boolean;
+begin
+  Result := False;
+  if not RunRuntimeFaultCase(RuntimeRangeArgs, RuntimeRangeName, 201) then Exit;
+  if not RunRuntimeFaultCase(RuntimeOverflowArgs, RuntimeOverflowName, 215) then Exit;
+  if not RunRuntimeFaultCase(RuntimeDivideArgs, RuntimeDivideName,
+       QWord($8000000000000000)) then Exit;
+  WriteCString('[ OK ] Phase 17 runtime fault isolation tests passed.'#13#10);
+  Result := True;
+end;
+{$endif}
+
 procedure MistixInitMain; cdecl; public name 'mistix_user_main';
 var
   PID, Status: QWord;
@@ -484,6 +549,13 @@ begin
     WriteCString('[WARN] Device-manager RPC test did not complete.'#13#10);
   if not TestNetworkService then
     WriteCString('[WARN] Network service RPC test did not complete.'#13#10);
+{$ifdef MISTIX_DEBUG_CHECKS}
+  if not TestRuntimeFaultIsolation then
+  begin
+    WriteCString('[FAIL] Phase 17 runtime fault isolation tests failed.'#13#10);
+    SysExit(1);
+  end;
+{$endif}
   WriteCString(#13#10'Starting Mistix shell.'#13#10);
   repeat
     PID := SysSpawnPath(PtrUInt(@ShellPath[0]), PtrUInt(@EmptyArgs[0]), 0, 1);
@@ -499,7 +571,7 @@ end;
 procedure MistixInitEntry; assembler; nostackframe; public name '_start';
 asm
   and rsp, -16
-  call mistix_user_main
+  call MistixInitMain
   xor edi, edi
   mov eax, 2
   int $80

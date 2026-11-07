@@ -245,225 +245,228 @@ begin
   Gate^.Reserved := 0;
 end;
 
+function TrapDispatch(Frame: PInterruptFrame): QWord; cdecl; forward;
+procedure ISRCommon; assembler; nostackframe; forward;
+
 procedure ISR0; assembler; nostackframe; public name 'mistix_isr_0';
 asm
   push 0
   push 0
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR1; assembler; nostackframe; public name 'mistix_isr_1';
 asm
   push 0
   push 1
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR2; assembler; nostackframe; public name 'mistix_isr_2';
 asm
   push 0
   push 2
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR3; assembler; nostackframe; public name 'mistix_isr_3';
 asm
   push 0
   push 3
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR4; assembler; nostackframe; public name 'mistix_isr_4';
 asm
   push 0
   push 4
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR5; assembler; nostackframe; public name 'mistix_isr_5';
 asm
   push 0
   push 5
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR6; assembler; nostackframe; public name 'mistix_isr_6';
 asm
   push 0
   push 6
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR7; assembler; nostackframe; public name 'mistix_isr_7';
 asm
   push 0
   push 7
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR8; assembler; nostackframe; public name 'mistix_isr_8';
 asm
   push 8
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR9; assembler; nostackframe; public name 'mistix_isr_9';
 asm
   push 0
   push 9
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR10; assembler; nostackframe; public name 'mistix_isr_10';
 asm
   push 10
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR11; assembler; nostackframe; public name 'mistix_isr_11';
 asm
   push 11
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR12; assembler; nostackframe; public name 'mistix_isr_12';
 asm
   push 12
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR13; assembler; nostackframe; public name 'mistix_isr_13';
 asm
   push 13
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR14; assembler; nostackframe; public name 'mistix_isr_14';
 asm
   push 14
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR15; assembler; nostackframe; public name 'mistix_isr_15';
 asm
   push 0
   push 15
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR16; assembler; nostackframe; public name 'mistix_isr_16';
 asm
   push 0
   push 16
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR17; assembler; nostackframe; public name 'mistix_isr_17';
 asm
   push 17
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR18; assembler; nostackframe; public name 'mistix_isr_18';
 asm
   push 0
   push 18
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR19; assembler; nostackframe; public name 'mistix_isr_19';
 asm
   push 0
   push 19
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR20; assembler; nostackframe; public name 'mistix_isr_20';
 asm
   push 0
   push 20
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR21; assembler; nostackframe; public name 'mistix_isr_21';
 asm
   push 21
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR22; assembler; nostackframe; public name 'mistix_isr_22';
 asm
   push 0
   push 22
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR23; assembler; nostackframe; public name 'mistix_isr_23';
 asm
   push 0
   push 23
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR24; assembler; nostackframe; public name 'mistix_isr_24';
 asm
   push 0
   push 24
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR25; assembler; nostackframe; public name 'mistix_isr_25';
 asm
   push 0
   push 25
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR26; assembler; nostackframe; public name 'mistix_isr_26';
 asm
   push 0
   push 26
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR27; assembler; nostackframe; public name 'mistix_isr_27';
 asm
   push 0
   push 27
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR28; assembler; nostackframe; public name 'mistix_isr_28';
 asm
   push 0
   push 28
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR29; assembler; nostackframe; public name 'mistix_isr_29';
 asm
   push 29
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR30; assembler; nostackframe; public name 'mistix_isr_30';
 asm
   push 30
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISR31; assembler; nostackframe; public name 'mistix_isr_31';
 asm
   push 0
   push 31
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISRSpurious; assembler; nostackframe; public name 'mistix_isr_spurious';
 asm
   push 0
   push 255
-  jmp mistix_isr_common
+  jmp ISRCommon
 end;
 
 procedure ISRCommon; assembler; nostackframe; public name 'mistix_isr_common';
@@ -487,7 +490,7 @@ asm
   mov r12, rsp
   mov rdi, r12
   and rsp, -16
-  call mistix_trap_dispatch
+  call TrapDispatch
   mov rsp, rax
   pop r15
   pop r14

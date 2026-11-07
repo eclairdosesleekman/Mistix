@@ -34,6 +34,7 @@ SHELL_ELF := $(USER_BUILD_DIR)/sh.elf
 LS_ELF := $(USER_BUILD_DIR)/ls.elf
 CAT_ELF := $(USER_BUILD_DIR)/cat.elf
 ECHO_ELF := $(USER_BUILD_DIR)/echo.elf
+RUNTIMEFAULT_ELF := $(USER_BUILD_DIR)/runtimefault.elf
 VFSD_ELF := $(USER_BUILD_DIR)/vfsd.elf
 BLOCKD_ELF := $(USER_BUILD_DIR)/blockd.elf
 DEVD_ELF := $(USER_BUILD_DIR)/devd.elf
@@ -63,7 +64,7 @@ KERNEL_SOURCES := \
 
 COMMON_INC := userland/common/mistixlib.inc
 
-.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check phase16-check fpc-runtime-check
+.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check phase16-check phase17-check fpc-runtime-check
 
 all: check-build-tools test user-verify kernel verify
 
@@ -82,6 +83,7 @@ check-source:
 	$(PYTHON) tools/check_phase14.py
 	$(PYTHON) tools/check_phase15.py
 	$(PYTHON) tools/check_phase16.py
+	$(PYTHON) tools/check_phase17.py
 
 check-python:
 	$(PYTHON) -m compileall -q tools
@@ -96,31 +98,31 @@ check-build-tools:
 	@command -v $(READELF) >/dev/null || { echo 'Missing readelf'; exit 1; }
 	@command -v $(PYTHON) >/dev/null || { echo 'Missing python3'; exit 1; }
 $(INIT_ELF): userland/init/mistixinit.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/init/mistixinit.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/init/mistixinit.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixinit.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(SHELL_ELF): userland/sh/mistixsh.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/sh/mistixsh.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/sh/mistixsh.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixsh.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(LS_ELF): userland/bin/mistixls.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixls.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/bin/mistixls.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixls.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(CAT_ELF): userland/bin/mistixcat.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixcat.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/bin/mistixcat.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixcat.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(ECHO_ELF): userland/bin/mistixecho.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/bin/mistixecho.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/bin/mistixecho.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixecho.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
@@ -132,31 +134,37 @@ $(VFS_BASE_BLOB_OBJ): $(VFS_BASEFS_IMG) | $(USER_BUILD_DIR)
 	cd $(BUILD_DIR) && $(LD) -r -b binary -o user/vfs_base_blob.o vfs_base.img
 
 $(VFSD_ELF): userland/vfs/mistixvfsd.pas $(COMMON_INC) userland/vfs/mistix_ext2_types.inc userland/vfs/mistix_ext2_client.inc userland/user.ld $(VFS_BASE_BLOB_OBJ) | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common -Fi../../userland/vfs ../../userland/vfs/mistixvfsd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common -Fi../../../userland/vfs ../../../userland/vfs/mistixvfsd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixvfsd.o $(VFS_BASE_BLOB_OBJ)
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(BLOCKD_ELF): userland/block/mistixblockd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/block/mistixblockd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/block/mistixblockd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixblockd.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(DEVD_ELF): userland/device/mistixdevd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/device/mistixdevd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/device/mistixdevd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixdevd.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
 $(NETD_ELF): userland/network/mistixnetd.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
-	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../userland/common ../../userland/network/mistixnetd.pas
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/network/mistixnetd.pas
 	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixnetd.o
 	@$(READELF) -h $@ | grep -q ELF64
 	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
 
-$(INITFS_IMG): $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) tools/mkinitfs.py docs/motd.txt | $(BUILD_DIR)
-	$(PYTHON) tools/mkinitfs.py $@ --file /bin/sh=$(SHELL_ELF) --file /bin/ls=$(LS_ELF) --file /bin/cat=$(CAT_ELF) --file /bin/echo=$(ECHO_ELF) --file /sbin/vfsd=$(VFSD_ELF) --file /sbin/blockd=$(BLOCKD_ELF) --file /sbin/devd=$(DEVD_ELF) --file /sbin/netd=$(NETD_ELF) --file /etc/motd=docs/motd.txt
+$(RUNTIMEFAULT_ELF): userland/tests/mistixruntimefault.pas $(COMMON_INC) userland/user.ld | $(USER_BUILD_DIR)
+	cd $(USER_BUILD_DIR) && $(FPC) $(FPC_COMMON_FLAGS) -FU. -FE. -Fi../../../userland/common ../../../userland/tests/mistixruntimefault.pas
+	$(LD) -m elf_x86_64 --nostdlib --build-id=none -z max-page-size=0x1000 -T userland/user.ld -o $@ $(USER_BUILD_DIR)/mistixruntimefault.o
+	@$(READELF) -h $@ | grep -q ELF64
+	@if $(NM) -u $@ 2>/dev/null | grep -q .; then $(NM) -u $@; exit 1; fi
+
+$(INITFS_IMG): $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) $(RUNTIMEFAULT_ELF) tools/mkinitfs.py docs/motd.txt | $(BUILD_DIR)
+	$(PYTHON) tools/mkinitfs.py $@ --file /bin/sh=$(SHELL_ELF) --file /bin/ls=$(LS_ELF) --file /bin/cat=$(CAT_ELF) --file /bin/echo=$(ECHO_ELF) --file /sbin/vfsd=$(VFSD_ELF) --file /sbin/blockd=$(BLOCKD_ELF) --file /sbin/devd=$(DEVD_ELF) --file /sbin/netd=$(NETD_ELF) --file /bin/runtimefault=$(RUNTIMEFAULT_ELF) --file /etc/motd=docs/motd.txt
 
 $(INITFS_BLOB_OBJ): $(INITFS_IMG) | $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(LD) -r -b binary -o initfs_blob.o initfs.img
@@ -179,7 +187,7 @@ user-verify: check-build-tools check-source $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $
 
 initfs: $(INITFS_IMG)
 kernel: check-build-tools check-source $(KERNEL_ELF)
-verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF)
+verify: $(KERNEL_ELF) $(INIT_ELF) $(SHELL_ELF) $(LS_ELF) $(CAT_ELF) $(ECHO_ELF) $(VFSD_ELF) $(BLOCKD_ELF) $(DEVD_ELF) $(NETD_ELF) $(RUNTIMEFAULT_ELF)
 	@$(READELF) -h $(KERNEL_ELF) | grep -q ELF64
 	@if $(NM) -u $(KERNEL_ELF) 2>/dev/null | grep -q .; then echo 'Kernel has unresolved symbols'; $(NM) -u $(KERNEL_ELF); exit 1; fi
 	@$(NM) $(KERNEL_ELF) | grep -q ' mistix_trap_dispatch$$'
@@ -227,6 +235,9 @@ smoke: iso
 	grep -F "[PASS] Phase 9 kernel foundations and userland VFS broker are prepared." "$(SMOKE_LOG)" >/dev/null || { echo "Kernel boot marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
 	grep -F "Starting Mistix shell." "$(SMOKE_LOG)" >/dev/null || { echo "Userland init marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
 	echo "Mistix headless QEMU boot smoke test passed."
+	@if [ "$(BUILD_TYPE)" = "debug" ]; then \
+	  grep -F "[ OK ] Phase 17 runtime fault isolation tests passed." "$(SMOKE_LOG)" >/dev/null || { echo "Runtime-fault isolation marker missing"; cat "$(SMOKE_LOG)" 2>/dev/null || true; exit 1; }; \
+	fi
 
 debug:
 	$(MAKE) BUILD_TYPE=debug all
@@ -257,6 +268,9 @@ phase15-check:
 
 phase16-check:
 	$(PYTHON) tools/check_phase16.py
+
+phase17-check:
+	$(PYTHON) tools/check_phase17.py
 
 fpc-runtime-check:
 	$(PYTHON) tools/check_fpc_runtime.py

@@ -137,12 +137,24 @@ asm
   jmp @halt_forever
 end;
 
-procedure MistixFPCRangeError; cdecl; public name 'FPC_RANGEERROR';
+procedure MistixFPCRangeError; cdecl; public name 'fpc_rangeerror';
 begin
   MistixRuntimePanic(201);
 end;
 
-procedure MistixFPCOverflow; cdecl; public name 'FPC_OVERFLOW';
+{ Keep the documented uppercase spelling as a compatibility alias. }
+procedure MistixFPCRangeErrorCompat; cdecl; public name 'FPC_RANGEERROR';
+begin
+  MistixRuntimePanic(201);
+end;
+
+procedure MistixFPCOverflow; cdecl; public name 'fpc_overflow';
+begin
+  MistixRuntimePanic(215);
+end;
+
+{ Preserve the uppercase runtime ABI spelling for compatibility. }
+procedure MistixFPCOverflowCompat; cdecl; public name 'FPC_OVERFLOW';
 begin
   MistixRuntimePanic(215);
 end;

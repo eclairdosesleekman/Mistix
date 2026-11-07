@@ -11,6 +11,9 @@ interface
 implementation
 {$I mistixlib.inc}
 
+const
+  NewLine: array[0..1] of Char = (#13, #10);
+
 procedure MistixLSMain; cdecl; public name 'mistix_user_main';
 var
   Args: array[0..127] of Char;
@@ -52,7 +55,7 @@ end;
 procedure MistixLSEntry; assembler; nostackframe; public name '_start';
 asm
   and rsp, -16
-  call mistix_user_main
+  call MistixLSMain
   xor edi, edi
   mov eax, 2
   int $80

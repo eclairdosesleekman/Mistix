@@ -17,17 +17,23 @@ RTL or changing the syscall ABI.
 
 ## Runtime entry points
 
-FPC-generated checked code calls compiler runtime procedures with no
-arguments. Mistix supplies the three symbols in every linked image:
+Mistix exports three no-argument compatibility/runtime entry points in every
+linked image:
 
-| Symbol | Runtime error | Code |
+| Symbol | Runtime error | Explicit hook status |
 | --- | --- | ---: |
-| `FPC_DIVBYZERO` | Division by zero | 200 |
-| `FPC_RANGEERROR` | Range check failure | 201 |
-| `FPC_OVERFLOW` | Integer arithmetic overflow | 215 |
+| `FPC_DIVBYZERO` | Division by zero fallback | 200 |
+| `fpc_rangeerror` | Range check failure | 201 |
+| `fpc_overflow` | Integer arithmetic overflow | 215 |
 
-The freestanding implementation intentionally does not call
-`FPC_HANDLEERROR`, `Halt`, `SysUtils`, or any other hosted RTL routine.
+The selected x86-64 FPC toolchain uses the ELF symbols `fpc_rangeerror` and `fpc_overflow` for userland checked operations; uppercase `FPC_RANGEERROR` and `FPC_OVERFLOW` aliases remain for the compile-time probe and compatibility.
+Its signed integer division uses the native `IDIV` instruction instead of an
+undefined `FPC_DIVBYZERO` helper; a zero divisor therefore raises CPU exception
+vector 0 (`#DE`). Mistix keeps the `FPC_DIVBYZERO` entry point available as a
+compatibility fallback, while the kernel trap dispatcher isolates native
+user-mode `#DE` faults as process exits. The older uppercase `FPC_RANGEERROR`
+spelling remains exported as a compatibility alias. The freestanding implementation does
+not call `FPC_HANDLEERROR`, `Halt`, `SysUtils`, or any other hosted RTL routine.
 
 ### Kernel
 

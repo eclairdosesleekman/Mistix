@@ -10,7 +10,7 @@ The project explores how Pascal's explicit types, structured records, and readab
 
 ## Current implementation
 
-The latest source and design milestone in the repository is **Phase 16**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
+The latest source and design milestone in the repository is **Phase 17**. This is a description of what is present in the source tree, not a claim that every subsystem has been validated on hardware or in an emulator.
 
 ### Kernel and execution environment
 
@@ -143,8 +143,8 @@ See [docs/PHASE14-DESIGN.md](docs/PHASE14-DESIGN.md) for the exact validation sc
 Phase 15 completes the runtime-checking work deferred by Phase 14:
 
 - Debug builds use FPC `-Cr -Co` and define `MISTIX_DEBUG_CHECKS`, enabling Pascal range (`{$R+}`) and integer-overflow (`{$Q+}`) checks across kernel and userland.
-- The kernel provides the compiler runtime entry points `FPC_RANGEERROR`, `FPC_OVERFLOW`, and `FPC_DIVBYZERO`. They emit a concise diagnostic on COM1 and halt without depending on the hosted RTL.
-- Userland provides the same entry points, terminating only the faulting process with the matching runtime-error status (201, 215, or 200).
+- The kernel provides freestanding range/overflow handlers and a `FPC_DIVBYZERO` compatibility entry point; they emit concise diagnostics on COM1 and halt without depending on the hosted RTL.
+- Userland exports the compiler's lowercase `fpc_rangeerror` and `fpc_overflow` hooks (plus uppercase compatibility aliases) that terminate the faulting process with statuses 201 and 215. The selected x86-64 FPC compiler implements signed divide-by-zero with native `IDIV` / CPU `#DE`, which the trap dispatcher isolates as a process exception.
 - Release builds retain the existing unchecked `{$R-}` / `{$Q-}` configuration.
 - `make phase15-check` verifies compiler flags, conditional directives, and freestanding handler wiring.
 
@@ -159,11 +159,22 @@ Phase 16 makes the Phase 15 runtime handlers a tested compiler contract:
 
 - A freestanding Pascal probe contains dynamic array indexing, signed arithmetic, and integer division operations that require runtime checks.
 - `make fpc-runtime-check` compiles that probe with the same x86-64, no-link, no-optimization, range-check, and overflow-check options as the Debug profile.
-- The validation inspects the generated object with `nm` and requires undefined references to `FPC_RANGEERROR`, `FPC_OVERFLOW`, and `FPC_DIVBYZERO`. This verifies the compiler actually emits the hooks that Mistix implements.
+- The validation inspects the generated object with `nm` and requires undefined references to `FPC_RANGEERROR` and `FPC_OVERFLOW`; GNU `objdump` also confirms that signed division is emitted as native `IDIV` (zero divisors raise CPU `#DE`).
 - The compile-only probe is kept separate from the freestanding kernel and userland images; it does not run privileged instructions or modify the guest.
 - `make phase16-check` verifies the test wiring and preserves the Phase 14 historical source-check contract.
 
 Run `make fpc-runtime-check` on a host with FPC and GNU `nm` installed. CI runs it before the full Release/Debug builds and QEMU smoke tests.
+
+## Phase 17 — runtime fault isolation
+
+Phase 17 closes the userland runtime-hook gap and exercises the process-exit path end to end:
+
+- The shared userland library now defines `FPC_DIVBYZERO`, `FPC_RANGEERROR`, and `FPC_OVERFLOW`; each hook exits only the faulting process with the compiler's runtime error code.
+- A freestanding `/bin/runtimefault` test image can trigger range, overflow, and divide-by-zero checks from runtime-supplied values.
+- Debug init launches each case as a child, waits for it, and checks the returned status (201, 215, and the vector-0 exception tag `0x8000000000000000`). The test fails boot smoke if the child does not exit with its expected code or cannot be reaped.
+- Release does not run deliberate fault cases. The new Debug smoke assertion requires the Phase 17 success marker.
+
+Run `make phase17-check` for host-only source-contract validation. `make smoke BUILD_TYPE=debug` builds the image and requires all three guest-side fault tests to pass under QEMU. This is targeted process-isolation coverage, not an exhaustive fault or hardware-validation suite.
 
 ## Networking
 
@@ -233,6 +244,7 @@ make phase13-check
 make phase14-check
 make phase15-check
 make phase16-check
+make phase17-check
 make fpc-runtime-check
 make test
 ```
@@ -257,6 +269,7 @@ Mistix/
 │   ├── init/               PID 1
 │   ├── network/            netd
 │   ├── sh/                 interactive shell
+│   ├── tests/              guest-side runtime fault probes
 │   └── vfs/                vfsd and Ext2 client
 ├── Makefile
 ├── linker.ld
@@ -282,8 +295,9 @@ The design notes are the best place to find the detailed invariants and limitati
 - [Phase 14 — Build, test, and boot validation](docs/PHASE14-DESIGN.md)
 - [Phase 15 — Freestanding runtime diagnostics](docs/PHASE15-DESIGN.md)
 - [Phase 16 — FPC runtime-check ABI verification](docs/PHASE16-DESIGN.md)
+- [Phase 17 — Runtime fault isolation](docs/PHASE17-DESIGN.md)
 
-Some legacy serial-output text still uses a Phase 9 label; the source and design notes describe later Phase 11–14 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
+Some legacy serial-output text still uses a Phase 9 label; the source and design notes describe later Phase 11–17 work. Treat the design notes and current source as the implementation reference rather than those older display strings.
 
 ## License
 

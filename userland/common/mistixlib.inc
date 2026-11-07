@@ -404,3 +404,32 @@ begin
     SysWrite(1, PtrUInt(@Digits[Count]), 1);
   end;
 end;
+
+
+{ Phase 17: terminate only the faulting user process when checked code fails. }
+procedure MistixFPCDivideByZero; cdecl; public name 'FPC_DIVBYZERO';
+begin
+  SysExit(200);
+end;
+
+procedure MistixFPCRangeError; cdecl; public name 'fpc_rangeerror';
+begin
+  SysExit(201);
+end;
+
+{ Keep the documented uppercase spelling as a compatibility alias. }
+procedure MistixFPCRangeErrorCompat; cdecl; public name 'FPC_RANGEERROR';
+begin
+  SysExit(201);
+end;
+
+procedure MistixFPCOverflow; cdecl; public name 'fpc_overflow';
+begin
+  SysExit(215);
+end;
+
+{ Preserve the uppercase runtime ABI spelling for compatibility. }
+procedure MistixFPCOverflowCompat; cdecl; public name 'FPC_OVERFLOW';
+begin
+  SysExit(215);
+end;

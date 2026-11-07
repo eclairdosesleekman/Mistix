@@ -177,7 +177,7 @@ asm
   cld
   xor rbp, rbp
   and rsp, -16
-  call mistix_kernel_main
+  call KernelMain
 @entry_halt:
   cli
   hlt
