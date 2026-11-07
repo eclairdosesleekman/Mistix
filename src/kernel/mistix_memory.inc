@@ -89,6 +89,9 @@ var
   ByteIndex: QWord;
 begin
   Result := False;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] PMMInitialize: entered.'#13#10);
+{$endif}
   if Memmap = nil then
   begin
     WriteText('[FAIL] PMM received a nil Limine memory map.'#13#10);
@@ -108,18 +111,30 @@ begin
   { Start conservatively: every physical page is reserved. Only Limine
     USABLE ranges are released to the allocator. Bootloader-reclaimable,
     kernel/module, ACPI, framebuffer and reserved pages remain unavailable. }
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] PMMInitialize: clearing bitmaps.'#13#10);
+{$endif}
   for ByteIndex := 0 to PMM_BITMAP_BYTES - 1 do
   begin
     PageBitmap[ByteIndex] := $FF;
     AllocatedBitmap[ByteIndex] := 0;
   end;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] PMMInitialize: bitmaps cleared.'#13#10);
+{$endif}
   PMMFreePageCount := 0;
   PMMAllocationHint := 1;
 
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] PMMInitialize: scanning memory map.'#13#10);
+{$endif}
   if Memmap^.EntryCount <> 0 then
   begin
     for I := 0 to Memmap^.EntryCount - 1 do
     begin
+{$ifdef MISTIX_DEBUG_CHECKS}
+      WriteText('[DEBUG] PMMInitialize: entry '); WriteDecimal(I); WriteText(#13#10);
+{$endif}
       Entry := Memmap^.Entries^[I];
       if Entry = nil then
       begin
@@ -152,6 +167,9 @@ begin
       end;
     end;
   end;
+{$ifdef MISTIX_DEBUG_CHECKS}
+  WriteText('[DEBUG] PMMInitialize: memory map scan complete.'#13#10);
+{$endif}
 
   { Physical page zero is never handed out, even if firmware labels it usable. }
   if not PMMPageIsUsed(0) then
