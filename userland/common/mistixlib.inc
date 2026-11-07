@@ -1,3 +1,11 @@
+{$ifdef MISTIX_DEBUG_CHECKS}
+{$R+}
+{$Q+}
+{$else}
+{$R-}
+{$Q-}
+{$endif}
+
 { Minimal Pascal-only syscall ABI; Phase 9 retains restricted block-service calls. }
 const
   MISTIX_ERRNO_BASE = QWord($FFFFFFFFFFFFF000);

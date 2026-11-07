@@ -15,12 +15,14 @@ SMOKE_TIMEOUT ?= 45
 BUILD_TYPE ?= release
 ifeq ($(BUILD_TYPE),debug)
 FPC_DIAGNOSTIC_FLAGS ?= -g
+FPC_RUNTIME_CHECK_FLAGS ?= -Cr -Co -dMISTIX_DEBUG_CHECKS
 else ifeq ($(BUILD_TYPE),release)
 FPC_DIAGNOSTIC_FLAGS ?= -g-
+FPC_RUNTIME_CHECK_FLAGS ?=
 else
 $(error BUILD_TYPE must be either 'debug' or 'release')
 endif
-FPC_COMMON_FLAGS := -Tlinux -Px86_64 -Cn -O- $(FPC_DIAGNOSTIC_FLAGS)
+FPC_COMMON_FLAGS := -Tlinux -Px86_64 -Cn -O- $(FPC_DIAGNOSTIC_FLAGS) $(FPC_RUNTIME_CHECK_FLAGS)
 
 BUILD_DIR ?= build/$(BUILD_TYPE)
 USER_BUILD_DIR := $(BUILD_DIR)/user
@@ -56,11 +58,12 @@ KERNEL_SOURCES := \
   $(SRC_DIR)/mistix_mount.inc $(SRC_DIR)/mistix_net.inc \
   $(SRC_DIR)/mistix_vfs.inc $(SRC_DIR)/mistix_process.inc \
   $(SRC_DIR)/mistix_shm.inc $(SRC_DIR)/mistix_syscall.inc $(SRC_DIR)/mistix_timer.inc \
-  $(SRC_DIR)/mistix_trap.inc $(SRC_DIR)/mistix_main.inc
+  $(SRC_DIR)/mistix_trap.inc $(SRC_DIR)/mistix_main.inc \
+  $(SRC_DIR)/mistix_runtime.inc
 
 COMMON_INC := userland/common/mistixlib.inc
 
-.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check
+.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check
 
 all: check-build-tools test user-verify kernel verify
 
@@ -77,6 +80,7 @@ check-source:
 	$(PYTHON) tools/check_phase12.py
 	$(PYTHON) tools/check_phase13.py
 	$(PYTHON) tools/check_phase14.py
+	$(PYTHON) tools/check_phase15.py
 
 check-python:
 	$(PYTHON) -m compileall -q tools
@@ -246,3 +250,6 @@ phase13-check:
 
 phase14-check:
 	$(PYTHON) tools/check_phase14.py
+
+phase15-check:
+	$(PYTHON) tools/check_phase15.py
