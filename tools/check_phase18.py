@@ -61,6 +61,9 @@ def main() -> int:
         "(Frame^.ErrorCode and $FFFFFFFF)",
         "ProcessTerminateCurrent(Frame, ExitCode)",
     ))
+    require("src/kernel/mistix_types.inc", (
+        "PTE_NO_EXECUTE = not QWord($7FFFFFFFFFFFFFFF)",
+    ))
     require("src/kernel/mistix_address_space.inc", (
         "ProgramHeader^.Flags and (ELF_PF_WRITE or ELF_PF_EXECUTE)",
         "PageFlags := PTE_USER;",
