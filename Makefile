@@ -65,7 +65,7 @@ KERNEL_SOURCES := \
 
 COMMON_INC := userland/common/mistixlib.inc
 
-.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check phase16-check phase17-check phase18-check phase19-check fpc-runtime-check
+.PHONY: all check-source check-python test check-build-tools check-tools user user-verify initfs kernel verify iso run run-debug smoke debug release clean create-disk phase10-check phase11-check phase12-check phase13-check phase14-check phase15-check phase16-check phase17-check phase18-check phase19-check phase20-check fpc-runtime-check
 
 all: check-build-tools test user-verify kernel verify
 
@@ -87,6 +87,7 @@ check-source:
 	$(PYTHON) tools/check_phase17.py
 	$(PYTHON) tools/check_phase18.py
 	$(PYTHON) tools/check_phase19.py
+	$(PYTHON) tools/check_phase20.py
 
 check-python:
 	$(PYTHON) -m compileall -q tools
@@ -281,6 +282,9 @@ phase18-check:
 
 phase19-check:
 	$(PYTHON) tools/check_phase19.py
+
+phase20-check:
+	$(PYTHON) tools/check_phase20.py
 
 fpc-runtime-check:
 	$(PYTHON) tools/check_fpc_runtime.py
