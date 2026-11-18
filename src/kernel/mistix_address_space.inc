@@ -90,12 +90,11 @@ begin
     Result := False;
     Exit;
   end;
-  if not PMMAllocatePage(NewRoot) then
+  if not PMMAllocPages(0, [afZero, afPageTable], NewRoot) then
   begin
     Result := False;
     Exit;
   end;
-  ZeroPhysicalPage(NewRoot);
   NewTable := PhysicalTablePointer(NewRoot);
   KernelTable := PhysicalTablePointer(VMMRootPhysical);
 
@@ -417,8 +416,7 @@ var
   PhysicalAddress: QWord;
 begin
   Result := False;
-  if not PMMAllocatePage(PhysicalAddress) then Exit;
-  ZeroPhysicalPage(PhysicalAddress);
+  if not PMMAllocPages(0, [afZero], PhysicalAddress) then Exit;
   if not AddressSpaceMapPage(RootPhysical, VirtualAddress,
                              PhysicalAddress, Flags) then
   begin

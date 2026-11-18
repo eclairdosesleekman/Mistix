@@ -1,105 +1,18 @@
-{ Mistix Phase 4: copy-on-write user page sharing.
-  The bounded reference table tracks only pages shared by fork(). }
-
-const
-  COW_MAX_SHARED_PAGES = 8192;
-
-type
-  TCOWPageReference = record
-    Active: Byte;
-    Reserved: array[0..5] of Byte;
-    PhysicalAddress: QWord;
-    ReferenceCount: LongWord;
-  end;
-  PCOWPageReference = ^TCOWPageReference;
-
-var
-  COWPageReferences: array[0..COW_MAX_SHARED_PAGES - 1] of TCOWPageReference;
+{ Phase 19: COW uses the PMM frame reference count as its sole owner. }
 
 procedure COWInitialize;
-var
-  I: LongWord;
 begin
-  for I := 0 to COW_MAX_SHARED_PAGES - 1 do
-  begin
-    COWPageReferences[I].Active := 0;
-    COWPageReferences[I].PhysicalAddress := 0;
-    COWPageReferences[I].ReferenceCount := 0;
-  end;
-  WriteText('[ OK ] Copy-on-write reference table initialised (' );
-  WriteDecimal(COW_MAX_SHARED_PAGES);
-  WriteText(' shared-page slots).'#13#10);
-end;
-
-function COWFindReference(PhysicalAddress: QWord;
-  out Slot: LongWord): Boolean;
-var
-  I: LongWord;
-begin
-  Result := False;
-  Slot := COW_MAX_SHARED_PAGES;
-  for I := 0 to COW_MAX_SHARED_PAGES - 1 do
-    if (COWPageReferences[I].Active <> 0) and
-       (COWPageReferences[I].PhysicalAddress = PhysicalAddress) then
-    begin
-      Slot := I;
-      Result := True;
-      Exit;
-    end;
+  WriteText('[ OK ] COW page ownership is backed by PMM frame refcounts.'#13#10);
 end;
 
 function COWAcquireSharedPage(PhysicalAddress: QWord): Boolean;
-var
-  I: LongWord;
-  FreeSlot: LongWord;
 begin
-  Result := False;
-  if (PhysicalAddress = 0) or
-     ((PhysicalAddress and (PAGE_SIZE - 1)) <> 0) then Exit;
-  if COWFindReference(PhysicalAddress, I) then
-  begin
-    if COWPageReferences[I].ReferenceCount = High(LongWord) then Exit;
-    Inc(COWPageReferences[I].ReferenceCount);
-    Result := True;
-    Exit;
-  end;
-  FreeSlot := COW_MAX_SHARED_PAGES;
-  for I := 0 to COW_MAX_SHARED_PAGES - 1 do
-    if COWPageReferences[I].Active = 0 then
-    begin
-      FreeSlot := I;
-      Break;
-    end;
-  if FreeSlot = COW_MAX_SHARED_PAGES then Exit;
-  COWPageReferences[FreeSlot].Active := 1;
-  COWPageReferences[FreeSlot].PhysicalAddress := PhysicalAddress;
-  COWPageReferences[FreeSlot].ReferenceCount := 2;
-  Result := True;
+  Result := PageGet(PhysicalAddress);
 end;
 
 function COWReleasePage(PhysicalAddress: QWord): Boolean;
-var
-  Slot: LongWord;
 begin
-  if COWFindReference(PhysicalAddress, Slot) then
-  begin
-    if COWPageReferences[Slot].ReferenceCount = 0 then
-    begin
-      Result := False;
-      Exit;
-    end;
-    Dec(COWPageReferences[Slot].ReferenceCount);
-    if COWPageReferences[Slot].ReferenceCount = 0 then
-    begin
-      COWPageReferences[Slot].Active := 0;
-      COWPageReferences[Slot].PhysicalAddress := 0;
-      Result := PMMFreePage(PhysicalAddress);
-      Exit;
-    end;
-    Result := True;
-    Exit;
-  end;
-  Result := PMMFreePage(PhysicalAddress);
+  Result := PagePut(PhysicalAddress);
 end;
 
 function COWGetLeaf(RootPhysical, VirtualAddress: QWord;
@@ -274,7 +187,6 @@ var
   EntryValue: QWord;
   PhysicalAddress: QWord;
   NewPhysicalAddress: QWord;
-  Slot: LongWord;
   ReferenceCount: LongWord;
   SourceBytes: PByte;
   DestinationBytes: PByte;
@@ -291,16 +203,12 @@ begin
   end;
   if (EntryValue and PTE_COW) = 0 then Exit;
   PhysicalAddress := EntryValue and PTE_ADDRESS_MASK;
-  if not COWFindReference(PhysicalAddress, Slot) then Exit;
-  ReferenceCount := COWPageReferences[Slot].ReferenceCount;
+  ReferenceCount := PageReferenceCount(PhysicalAddress);
   if ReferenceCount = 0 then Exit;
 
   if ReferenceCount = 1 then
   begin
     Leaf^ := (EntryValue or PTE_WRITABLE) and not PTE_COW;
-    COWPageReferences[Slot].Active := 0;
-    COWPageReferences[Slot].PhysicalAddress := 0;
-    COWPageReferences[Slot].ReferenceCount := 0;
     if (ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical then
       InvalidatePage(VirtualAddress and PAGE_MASK);
     Result := True;
@@ -314,7 +222,11 @@ begin
     DestinationBytes[I] := SourceBytes[I];
   Leaf^ := (NewPhysicalAddress and PTE_ADDRESS_MASK) or PTE_PRESENT or
            (((EntryValue and PTE_ALLOWED_FLAGS) or PTE_WRITABLE) and not PTE_COW);
-  Dec(COWPageReferences[Slot].ReferenceCount);
+  if not PagePut(PhysicalAddress) then
+  begin
+    WriteText('[FATAL] COW could not drop the replaced frame reference.'#13#10);
+    HaltForever;
+  end;
   if (ReadCR3 and PTE_ADDRESS_MASK) = RootPhysical then
     InvalidatePage(VirtualAddress and PAGE_MASK);
   Result := True;
