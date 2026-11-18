@@ -29,6 +29,7 @@ var
 procedure ThreadYield; forward;
 procedure ThreadBlockCurrent(WaitKey: QWord); forward;
 function ThreadWakeWaiters(WaitKey: QWord; WakeAll: Boolean): LongWord; forward;
+procedure ThreadSchedule; forward;
 procedure ThreadIdleHalt; assembler; nostackframe;
 asm
   sti
