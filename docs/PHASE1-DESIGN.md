@@ -7,13 +7,13 @@
 - HHDM and memory-map pointers are the virtual pointers returned by Limine; no fixed HHDM constant is assumed.
 - The Limine entry selectors are retained: code `0x28`, data `0x30`.
 
-## Physical allocator policy
+## Physical allocator policy (superseded by Phase 19)
 
-The used-page bitmap begins fully allocated. Only complete 4 KiB pages wholly contained in Limine `USABLE` ranges are cleared. Page frame zero is always reserved. A second bitmap records frames allocated by this PMM instance, so reserved frames and double frees are rejected. The fixed bitmaps track 64 GiB of physical address space; pages outside this range are unavailable to the allocator.
+The original bring-up implementation used two fixed bitmaps and tracked 64 GiB. Phase 19 replaces that policy with normalized firmware memory ranges, per-region page-frame metadata, DMA32/Normal zones, a Buddy allocator, and page reference counts. The bitmap description is retained here only as historical Phase 1 context; see [Phase 19 memory design](PHASE19-DESIGN.md) for the current implementation.
 
 ## Virtual memory policy
 
-The VMM walks and extends Limine's existing four-level hierarchy. It allocates page-table frames from PMM and accesses them through HHDM. It supports 4 KiB leaf mappings, and the translation helper understands existing 2 MiB and 1 GiB huge mappings. The allocator does not yet reclaim empty page-table pages.
+The VMM walks and extends Limine's existing four-level hierarchy. It allocates page-table frames from the Buddy PMM and accesses them through HHDM. It supports 4 KiB leaf mappings, and the translation helper understands existing 2 MiB and 1 GiB huge mappings. Empty page-table reclamation remains part of the later address-space lifecycle work.
 
 ## CPU descriptor policy
 

@@ -1,240 +1,6 @@
-type
-  TPageTable = array[0..511] of QWord;
-  PPageTable = ^TPageTable;
-
-var
-  PageBitmap: array[0..PMM_BITMAP_BYTES - 1] of Byte;
-  { Tracks pages allocated by this PMM instance; reserved pages cannot be freed. }
-  AllocatedBitmap: array[0..PMM_BITMAP_BYTES - 1] of Byte;
-  PMMFreePageCount: QWord;
-  PMMAllocationHint: QWord;
-  MemoryHHDMOffset: QWord;
-  VMMRootPhysical: QWord;
-
-function PMMPageIsUsed(PageIndex: QWord): Boolean;
-var
-  ByteIndex: QWord;
-  Mask: Byte;
-begin
-  ByteIndex := PageIndex shr 3;
-  Mask := Byte(1 shl (PageIndex and 7));
-  Result := (PageBitmap[ByteIndex] and Mask) <> 0;
-end;
-
-function PMMPageWasAllocated(PageIndex: QWord): Boolean;
-var
-  ByteIndex: QWord;
-  Mask: Byte;
-begin
-  ByteIndex := PageIndex shr 3;
-  Mask := Byte(1 shl (PageIndex and 7));
-  Result := (AllocatedBitmap[ByteIndex] and Mask) <> 0;
-end;
-
-procedure PMMSetAllocated(PageIndex: QWord);
-var
-  ByteIndex: QWord;
-  Mask: Byte;
-begin
-  ByteIndex := PageIndex shr 3;
-  Mask := Byte(1 shl (PageIndex and 7));
-  AllocatedBitmap[ByteIndex] := AllocatedBitmap[ByteIndex] or Mask;
-end;
-
-procedure PMMClearAllocated(PageIndex: QWord);
-var
-  ByteIndex: QWord;
-  Mask: Byte;
-begin
-  ByteIndex := PageIndex shr 3;
-  Mask := Byte(1 shl (PageIndex and 7));
-  AllocatedBitmap[ByteIndex] := AllocatedBitmap[ByteIndex] and not Mask;
-end;
-
-procedure PMMMarkUsed(PageIndex: QWord);
-var
-  ByteIndex: QWord;
-  Mask: Byte;
-begin
-  ByteIndex := PageIndex shr 3;
-  Mask := Byte(1 shl (PageIndex and 7));
-  if (PageBitmap[ByteIndex] and Mask) = 0 then
-    Dec(PMMFreePageCount);
-  PageBitmap[ByteIndex] := PageBitmap[ByteIndex] or Mask;
-end;
-
-procedure PMMMarkFree(PageIndex: QWord);
-var
-  ByteIndex: QWord;
-  Mask: Byte;
-begin
-  if (PageIndex = 0) or (PageIndex >= PMM_PAGE_COUNT) then
-    Exit;
-  ByteIndex := PageIndex shr 3;
-  Mask := Byte(1 shl (PageIndex and 7));
-  if (PageBitmap[ByteIndex] and Mask) <> 0 then
-  begin
-    PageBitmap[ByteIndex] := PageBitmap[ByteIndex] and not Mask;
-    Inc(PMMFreePageCount);
-  end;
-end;
-
-function PMMInitialize(Memmap: PLimineMemmapResponse): Boolean;
-var
-  I: QWord;
-  PageIndex: QWord;
-  StartAddress: QWord;
-  EndAddress: QWord;
-  Entry: PLimineMemmapEntry;
-  ByteIndex: QWord;
-begin
-  Result := False;
-{$ifdef MISTIX_DEBUG_CHECKS}
-  WriteText('[DEBUG] PMMInitialize: entered.'#13#10);
-{$endif}
-  if Memmap = nil then
-  begin
-    WriteText('[FAIL] PMM received a nil Limine memory map.'#13#10);
-    Exit;
-  end;
-  if Memmap^.EntryCount > LIMINE_MAX_MEMMAP_ENTRIES then
-  begin
-    WriteText('[FAIL] PMM memory map entry count exceeds safety limit.'#13#10);
-    Exit;
-  end;
-  if (Memmap^.EntryCount <> 0) and (Memmap^.Entries = nil) then
-  begin
-    WriteText('[FAIL] PMM memory map entry array is nil.'#13#10);
-    Exit;
-  end;
-
-  { Start conservatively: every physical page is reserved. Only Limine
-    USABLE ranges are released to the allocator. Bootloader-reclaimable,
-    kernel/module, ACPI, framebuffer and reserved pages remain unavailable. }
-{$ifdef MISTIX_DEBUG_CHECKS}
-  WriteText('[DEBUG] PMMInitialize: clearing bitmaps.'#13#10);
-{$endif}
-  for ByteIndex := 0 to PMM_BITMAP_BYTES - 1 do
-  begin
-    PageBitmap[ByteIndex] := $FF;
-    AllocatedBitmap[ByteIndex] := 0;
-  end;
-{$ifdef MISTIX_DEBUG_CHECKS}
-  WriteText('[DEBUG] PMMInitialize: bitmaps cleared.'#13#10);
-{$endif}
-  PMMFreePageCount := 0;
-  PMMAllocationHint := 1;
-
-{$ifdef MISTIX_DEBUG_CHECKS}
-  WriteText('[DEBUG] PMMInitialize: scanning memory map.'#13#10);
-{$endif}
-  if Memmap^.EntryCount <> 0 then
-  begin
-    for I := 0 to Memmap^.EntryCount - 1 do
-    begin
-{$ifdef MISTIX_DEBUG_CHECKS}
-      WriteText('[DEBUG] PMMInitialize: entry '); WriteDecimal(I); WriteText(#13#10);
-{$endif}
-      Entry := Memmap^.Entries^[I];
-      if Entry = nil then
-      begin
-        WriteText('[FAIL] Null memory-map entry while initialising PMM.'#13#10);
-        Exit;
-      end;
-      if Entry^.EntryType <> LIMINE_MEMMAP_USABLE then
-        Continue;
-      if Entry^.Length = 0 then
-        Continue;
-      if Entry^.Length > High(QWord) - Entry^.Base then
-        Continue;
-
-      StartAddress := Entry^.Base;
-      if (StartAddress and (PAGE_SIZE - 1)) <> 0 then
-      begin
-        if StartAddress > High(QWord) - (PAGE_SIZE - 1) then
-          Continue;
-        StartAddress := (StartAddress + PAGE_SIZE - 1) and PAGE_MASK;
-      end;
-      EndAddress := (Entry^.Base + Entry^.Length) and PAGE_MASK;
-      if EndAddress <= StartAddress then
-        Continue;
-
-      PageIndex := StartAddress shr 12;
-      while (PageIndex < PMM_PAGE_COUNT) and ((PageIndex shl 12) < EndAddress) do
-      begin
-        PMMMarkFree(PageIndex);
-        Inc(PageIndex);
-      end;
-    end;
-  end;
-{$ifdef MISTIX_DEBUG_CHECKS}
-  WriteText('[DEBUG] PMMInitialize: memory map scan complete.'#13#10);
-{$endif}
-
-  { Physical page zero is never handed out, even if firmware labels it usable. }
-  if not PMMPageIsUsed(0) then
-    PMMMarkUsed(0);
-
-  Result := True;
-  WriteText('[ OK ] PMM bitmap initialised; free 4 KiB pages: ');
-  WriteDecimal(PMMFreePageCount);
-  WriteText(#13#10);
-end;
-
-function PMMAllocatePage(var PhysicalAddress: QWord): Boolean;
-var
-  Offset: QWord;
-  PageIndex: QWord;
-begin
-  Result := False;
-  PhysicalAddress := 0;
-  if PMMFreePageCount = 0 then
-    Exit;
-
-  for Offset := 0 to PMM_PAGE_COUNT - 1 do
-  begin
-    PageIndex := PMMAllocationHint + Offset;
-    if PageIndex >= PMM_PAGE_COUNT then
-      PageIndex := PageIndex - PMM_PAGE_COUNT;
-    if PageIndex = 0 then
-      Continue;
-    if not PMMPageIsUsed(PageIndex) then
-    begin
-      PMMMarkUsed(PageIndex);
-      PMMSetAllocated(PageIndex);
-      PMMAllocationHint := PageIndex + 1;
-      if PMMAllocationHint >= PMM_PAGE_COUNT then
-        PMMAllocationHint := 1;
-      PhysicalAddress := PageIndex shl 12;
-      Result := True;
-      Exit;
-    end;
-  end;
-end;
-
-function PMMFreePage(PhysicalAddress: QWord): Boolean;
-var
-  PageIndex: QWord;
-begin
-  Result := False;
-  if (PhysicalAddress and (PAGE_SIZE - 1)) <> 0 then
-    Exit;
-  PageIndex := PhysicalAddress shr 12;
-  if (PageIndex = 0) or (PageIndex >= PMM_PAGE_COUNT) then
-    Exit;
-  if not PMMPageWasAllocated(PageIndex) then
-    Exit; { reject reserved pages and double frees }
-  PMMClearAllocated(PageIndex);
-  PMMMarkFree(PageIndex);
-  if PageIndex < PMMAllocationHint then
-    PMMAllocationHint := PageIndex;
-  Result := True;
-end;
-
-function PMMGetFreePages: QWord;
-begin
-  Result := PMMFreePageCount;
-end;
+{$I mistix_memory_types.inc}
+{$I mistix_buddy.inc}
+{$I mistix_heap.inc}
 
 function IsCanonicalAddress(VirtualAddress: QWord): Boolean;
 var
@@ -265,10 +31,7 @@ end;
 
 function AllocatePageTable(out PhysicalAddress: QWord): Boolean;
 begin
-  Result := PMMAllocatePage(PhysicalAddress);
-  if not Result then
-    Exit;
-  ZeroPhysicalPage(PhysicalAddress);
+  Result := PMMAllocPages(0, [afZero, afPageTable], PhysicalAddress);
 end;
 
 function GetOrCreateChildTable(Parent: PPageTable; Index: QWord;
@@ -482,6 +245,16 @@ var
   TestByte: PByte;
 begin
   Result := False;
+  if not PMMBuddySelfTest then
+  begin
+    WriteText('[FAIL] Buddy allocator split/merge/refcount self-test failed.'#13#10);
+    Exit;
+  end;
+  if not KernelHeapSelfTest then
+  begin
+    WriteText('[FAIL] Kernel heap slab/page allocation self-test failed.'#13#10);
+    Exit;
+  end;
   if not FindFreeTestVirtualAddress(TestVirtual) then
   begin
     WriteText('[FAIL] VMM self-test could not find an unused canonical virtual page.'#13#10);
@@ -562,6 +335,7 @@ begin
 {$endif}
   if not PMMInitialize(Memmap) then
     Exit;
+  KernelHeapInitialize;
 {$ifdef MISTIX_DEBUG_CHECKS}
   WriteText('[DEBUG] MemoryInitialize: PMM initialized.'#13#10);
 {$endif}

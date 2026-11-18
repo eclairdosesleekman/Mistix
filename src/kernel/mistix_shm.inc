@@ -203,8 +203,17 @@ begin
         BaseAddress + QWord(I) * P7_SHM_PAGE_SIZE,
         ExistingPhysical, ExistingFlags) then Break;
     Physical := P7SharedObjects[ObjectIndex].Pages[I];
+    if not PageGet(Physical) then Break;
     if not AddressSpaceMapPage(ProcessTable[ProcessIndex].AddressSpaceRoot,
-        BaseAddress + QWord(I) * P7_SHM_PAGE_SIZE, Physical, Flags) then Break;
+        BaseAddress + QWord(I) * P7_SHM_PAGE_SIZE, Physical, Flags) then
+    begin
+      if not PagePut(Physical) then
+      begin
+        WriteText('[FATAL] Shared-memory map rollback lost a frame reference.'#13#10);
+        HaltForever;
+      end;
+      Break;
+    end;
     Inc(Mapped);
   end;
   if Mapped <> P7SharedObjects[ObjectIndex].PageCount then
@@ -212,8 +221,22 @@ begin
     if Mapped <> 0 then
       for J := 0 to Mapped - 1 do
       begin
-        if AddressSpaceUnmapPage(ProcessTable[ProcessIndex].AddressSpaceRoot,
-            BaseAddress + QWord(J) * P7_SHM_PAGE_SIZE, ExistingPhysical) then ;
+        if not AddressSpaceUnmapPage(ProcessTable[ProcessIndex].AddressSpaceRoot,
+            BaseAddress + QWord(J) * P7_SHM_PAGE_SIZE, ExistingPhysical) then
+        begin
+          WriteText('[FATAL] Shared-memory map rollback could not unmap a page.'#13#10);
+          HaltForever;
+        end;
+        if ExistingPhysical <> P7SharedObjects[ObjectIndex].Pages[J] then
+        begin
+          WriteText('[FATAL] Shared-memory map rollback physical mismatch.'#13#10);
+          HaltForever;
+        end;
+        if not PagePut(ExistingPhysical) then
+        begin
+          WriteText('[FATAL] Shared-memory map rollback could not drop a page reference.'#13#10);
+          HaltForever;
+        end;
       end;
     Result := QWord(-16);
     Exit;
@@ -248,8 +271,8 @@ begin
         if not AddressSpaceUnmapPage(ProcessTable[ProcessIndex].AddressSpaceRoot,
             BaseAddress + QWord(J) * P7_SHM_PAGE_SIZE, Physical) then
         begin
-          Result := QWord(-14);
-          Exit;
+          WriteText('[FATAL] Shared-memory unmap lost an expected mapping.'#13#10);
+          HaltForever;
         end
         else
         begin
@@ -260,6 +283,11 @@ begin
           end;
           if ProcessIndex = CurrentProcessIndex then
             P7ShmInvalidate(BaseAddress + QWord(J) * P7_SHM_PAGE_SIZE);
+          if not PagePut(Physical) then
+          begin
+            WriteText('[FATAL] Shared-memory unmap could not drop a page reference.'#13#10);
+            HaltForever;
+          end;
         end;
       P7SharedMappings[I].Active := 0;
       P7SharedMappings[I].PageCount := 0;
@@ -295,11 +323,28 @@ begin
        (P7SharedMappings[I].ProcessIndex = ProcessIndex) then
     begin
       for J := 0 to P7SharedMappings[I].PageCount - 1 do
-        if AddressSpaceUnmapPage(ProcessTable[ProcessIndex].AddressSpaceRoot,
+      begin
+        if not AddressSpaceUnmapPage(ProcessTable[ProcessIndex].AddressSpaceRoot,
           P7SharedMappings[I].BaseAddress + QWord(J) * P7_SHM_PAGE_SIZE,
-          Physical) and (ProcessIndex = CurrentProcessIndex) then
+          Physical) then
+        begin
+          WriteText('[FATAL] Process teardown could not unmap shared memory.'#13#10);
+          HaltForever;
+        end;
+        if Physical <> P7SharedObjects[P7SharedMappings[I].ObjectIndex].Pages[J] then
+        begin
+          WriteText('[FATAL] Process teardown found a shared-memory frame mismatch.'#13#10);
+          HaltForever;
+        end;
+        if ProcessIndex = CurrentProcessIndex then
           P7ShmInvalidate(P7SharedMappings[I].BaseAddress +
             QWord(J) * P7_SHM_PAGE_SIZE);
+        if not PagePut(Physical) then
+        begin
+          WriteText('[FATAL] Process teardown could not release shared-page reference.'#13#10);
+          HaltForever;
+        end;
+      end;
       P7SharedMappings[I].Active := 0;
       P7SharedMappings[I].PageCount := 0;
     end;
