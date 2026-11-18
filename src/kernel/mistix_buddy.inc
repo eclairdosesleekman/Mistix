@@ -594,6 +594,13 @@ begin
     Exit;
   end;
 
+  Pages := QWord(1) shl Order;
+  if PMMFreePageCount < Pages then
+  begin
+    PMMRestoreInterrupts(SavedFlags);
+    Exit;
+  end;
+
   Zone := TMemoryZoneKind(SearchZone);
   SelectedPFN := BuddyFreeLists[SearchZone, FoundOrder];
   if not PMMListRemove(SelectedPFN, FoundOrder, Zone) then
@@ -677,11 +684,6 @@ begin
         BuddyFrame^.Order := -1;
         BuddyFrame^.State := pgTail;
       end;
-  end;
-  if PMMFreePageCount < Pages then
-  begin
-    PMMRestoreInterrupts(SavedFlags);
-    Exit;
   end;
   Dec(PMMFreePageCount, Pages);
   BasePhysical := SelectedPFN shl 12;
